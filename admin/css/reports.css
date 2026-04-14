@@ -1,0 +1,342 @@
+/* ═══════════════════════════════════════════
+ * WSSP Reports — Admin Styles
+ * Extends admin.css — loaded only on report pages.
+ * ═══════════════════════════════════════════ */
+
+/* ─── Report layout ─── */
+.wssp-report__subtitle {
+    color: #646970;
+    font-size: 14px;
+    margin-top: -8px;
+}
+
+.wssp-report__count {
+    color: #646970;
+    font-size: 13px;
+    margin-bottom: 12px;
+}
+
+/* ─── Filter bar ─── */
+.wssp-report__filters {
+    margin: 0;
+}
+
+.wssp-report__filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.wssp-report__filter-row label {
+    font-weight: 600;
+    font-size: 13px;
+    margin-left: 8px;
+}
+
+.wssp-report__filter-row label:first-child {
+    margin-left: 0;
+}
+
+.wssp-report__filter-row select {
+    min-width: 200px;
+}
+
+.wssp-report__filter-row input[type="date"] {
+    width: 150px;
+}
+
+/* ─── Audit log table ─── */
+.wssp-report__table .wssp-col--timestamp { width: 130px; }
+.wssp-report__table .wssp-col--user      { width: 130px; }
+.wssp-report__table .wssp-col--action    { width: 130px; }
+.wssp-report__table .wssp-col--entity    { width: 120px; }
+.wssp-report__table .wssp-col--field     { width: 140px; }
+.wssp-report__table .wssp-col--source    { width: 100px; }
+
+.wssp-report__table .wssp-col--value {
+    max-width: 200px;
+    word-break: break-word;
+    font-size: 12px;
+}
+
+.wssp-report__time {
+    color: #999;
+    font-size: 12px;
+}
+
+.wssp-report__trigger {
+    color: #999;
+    font-size: 11px;
+    font-style: italic;
+}
+
+/* Action badges */
+.wssp-report__action-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    background: #f0f0f0;
+    color: #555;
+}
+
+.wssp-report__action-badge--field_edit {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.wssp-report__action-badge--form_submitted {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.wssp-report__action-badge--status_change {
+    background: #fff3e0;
+    color: #e65100;
+}
+
+.wssp-report__action-badge--file_upload {
+    background: #f3e5f5;
+    color: #6a1b9a;
+}
+
+.wssp-report__action-badge--file_status_change {
+    background: #fce4ec;
+    color: #c62828;
+}
+
+.wssp-report__action-badge--team_change {
+    background: #fff8e1;
+    color: #f57f17;
+}
+
+/* ─── Pagination ─── */
+.wssp-report__pagination {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #eee;
+}
+
+.wssp-report__page-info {
+    color: #646970;
+    font-size: 13px;
+}
+
+/* ═══════════════════════════════════════════
+ * TASK COMPLETION MATRIX
+ * ═══════════════════════════════════════════ */
+
+/* ─── Legend ─── */
+.wssp-report__legend-card {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    padding: 12px 20px;
+}
+
+.wssp-report__legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #555;
+}
+
+/* Status dots */
+.wssp-report__dot {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.wssp-report__dot--not_started {
+    background: #e5e7eb;
+    border: 1px solid #d1d5db;
+}
+
+.wssp-report__dot--acknowledged {
+    background: #c7d2fe;
+    border: 1px solid #a5b4fc;
+}
+
+.wssp-report__dot--in_progress {
+    background: #fcd34d;
+    border: 1px solid #f59e0b;
+}
+
+.wssp-report__dot--under_review {
+    background: #fcd34d;
+    border: 1px solid #f59e0b;
+}
+
+.wssp-report__dot--complete {
+    background: #6ee7b7;
+    border: 1px solid #34d399;
+}
+
+.wssp-report__dot--approved {
+    background: #6ee7b7;
+    border: 1px solid #34d399;
+}
+
+.wssp-report__dot--revision_requested {
+    background: #fca5a5;
+    border: 1px solid #f87171;
+}
+
+/* ─── Matrix container ─── */
+.wssp-report__matrix-wrap {
+    padding: 0;
+    overflow: hidden;
+}
+
+.wssp-report__matrix-scroll {
+    overflow-x: auto;
+    padding: 0;
+}
+
+/* ─── Matrix table ─── */
+.wssp-report__matrix {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+}
+
+.wssp-report__matrix th,
+.wssp-report__matrix td {
+    border: 1px solid #e5e7eb;
+    padding: 6px 8px;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.wssp-report__matrix thead th {
+    background: #f8f9fa;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+/* Phase group header */
+.wssp-report__matrix-phase-header {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #374151;
+    border-bottom: 2px solid #2e75b6;
+}
+
+/* Task column headers — rotated for density */
+.wssp-report__matrix-task-header {
+    min-width: 36px;
+    max-width: 36px;
+    height: 140px;
+    white-space: nowrap;
+    overflow: hidden;
+    padding: 0 4px 8px;
+}
+
+.wssp-report__matrix-task-header span {
+    display: block;
+    transform: rotate(-60deg);
+    transform-origin: left bottom;
+    font-size: 11px;
+    font-weight: 500;
+    width: 130px;
+    text-align: left;
+    color: #374151;
+}
+
+/* Session column — sticky left */
+.wssp-report__matrix-session-header,
+.wssp-report__matrix-session-cell {
+    text-align: left;
+    white-space: nowrap;
+    min-width: 180px;
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: #fff;
+}
+
+.wssp-report__matrix-session-header {
+    background: #f8f9fa;
+}
+
+.wssp-report__matrix-session-cell a {
+    text-decoration: none;
+}
+
+.wssp-report__matrix-name {
+    display: block;
+    font-size: 11px;
+    color: #999;
+}
+
+/* Rollup column */
+.wssp-report__matrix-rollup-header,
+.wssp-report__matrix-rollup-cell {
+    min-width: 110px;
+    position: sticky;
+    left: 180px;
+    z-index: 2;
+    background: #fff;
+}
+
+.wssp-report__matrix-rollup-header {
+    background: #f8f9fa;
+}
+
+/* Status cells — subtle background tint */
+.wssp-report__matrix-cell {
+    padding: 4px;
+}
+
+.wssp-report__matrix-cell--not_started         { background: #fafafa; }
+.wssp-report__matrix-cell--acknowledged         { background: #eef2ff; }
+.wssp-report__matrix-cell--in_progress          { background: #fffbeb; }
+.wssp-report__matrix-cell--under_review         { background: #fffbeb; }
+.wssp-report__matrix-cell--complete             { background: #ecfdf5; }
+.wssp-report__matrix-cell--approved             { background: #ecfdf5; }
+.wssp-report__matrix-cell--revision_requested   { background: #fef2f2; }
+
+/* Center the dot in each cell */
+.wssp-report__matrix-cell .wssp-report__dot {
+    margin: 0 auto;
+    display: block;
+}
+
+/* ─── Completion summary ─── */
+.wssp-report__progress-bar {
+    display: inline-block;
+    width: 120px;
+    height: 12px;
+    background: #e5e7eb;
+    border-radius: 6px;
+    overflow: hidden;
+    vertical-align: middle;
+}
+
+.wssp-report__progress-fill {
+    height: 100%;
+    background: #34d399;
+    border-radius: 6px;
+    transition: width 0.3s ease;
+}
+
+.wssp-report__progress-label {
+    display: inline-block;
+    margin-left: 8px;
+    font-size: 12px;
+    color: #666;
+    vertical-align: middle;
+}

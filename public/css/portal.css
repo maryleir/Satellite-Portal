@@ -1,0 +1,1277 @@
+/* ═══════════════════════════════════════════════
+ * WORLDSymposium Satellite Portal — Frontend CSS
+ * Matches the Adobe Illustrator mockup aesthetic.
+ * ═══════════════════════════════════════════════ */
+
+/* ─── Reset & Base ─── */
+.wssp-portal {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px 40px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: #333;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+}
+
+.wssp-portal *, .wssp-portal *::before, .wssp-portal *::after {
+    box-sizing: border-box;
+}
+
+.wssp-missing {
+    color: #aaa;
+    font-style: italic;
+}
+
+/* ═══════════════════════════════════════════════
+ * PORTAL HEADER
+ * ═══════════════════════════════════════════════ */
+.wssp-portal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 0;
+    border-bottom: 1px solid #eee;
+    margin-bottom: 24px;
+}
+
+.wssp-portal-header__left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.wssp-portal-header__icon {
+    width: 40px;
+    height: 40px;
+    background: #030213;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    color: #555;
+}
+
+.wssp-portal-header__title {
+    display: flex;
+    flex-direction: column;
+}
+
+.wssp-portal-header__name {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1a1a2e;
+}
+
+.wssp-portal-header__subtitle {
+    font-size: 13px;
+    color: #888;
+}
+
+.wssp-portal-header__right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.wssp-portal-header__session-label {
+    font-size: 14px;
+    color: #666;
+}
+
+.wssp-portal-header__session-select {
+    padding: 8px 32px 8px 12px;
+    font-size: 14px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #fff;
+    color: #333;
+    min-width: 240px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+}
+
+.wssp-portal-header__date {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: #555;
+    padding: 8px 14px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    white-space: nowrap;
+}
+
+.wssp-portal-header__date-select {
+    font-size: 13px;
+    color: #333;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 0 4px;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2.5' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0 center;
+    padding-right: 16px;
+    max-width: 320px;
+}
+
+.wssp-portal-header__date-select:focus {
+    outline: none;
+}
+
+.wssp-portal-header__date-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #fff;
+    background: #ef4444;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 4px;
+}
+
+.wssp-portal-header__date--override {
+    border-color: #ef4444;
+    border-style: dashed;
+}
+
+/* ═══════════════════════════════════════════════
+ * SESSION OVERVIEW ROW (2/3 + 1/3)
+ * ═══════════════════════════════════════════════ */
+.wssp-overview-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 20px;
+    margin-bottom: 32px;
+}
+
+/* ─── Session Info Card ─── */
+.wssp-overview-card {
+    background: #fff;
+    border: 1px solid #e5e5e5;
+    border-radius: 12px;
+    padding: 28px;
+}
+
+.wssp-overview-card__badges {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+
+.wssp-overview-card__title {
+    font-size: 22px;
+    font-weight: 600;
+    color: #1a1a2e;
+    margin: 0 0 4px;
+    line-height: 1.3;
+}
+
+.wssp-overview-card__company {
+    font-size: 15px;
+    color: #777;
+    margin: 0 0 24px;
+}
+
+.wssp-overview-card__details {
+    display: flex;
+    gap: 48px;
+    margin-bottom: 20px;
+}
+
+.wssp-overview-card__detail {
+    flex: 1 1 280px;              /* grow, shrink, minimum width */
+    display: flex;
+    align-items: flex-start;    
+    gap: 10px;
+    color: #888;
+}
+
+.wssp-overview-card__detail svg {
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.wssp-overview-card__detail-label {
+    display: block;
+    font-size: 12px;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.wssp-overview-card__detail-value {
+    display: block;
+    font-size: 15px;
+    color: #333;
+    font-weight: 500;
+}
+
+.wssp-overview-card__section {
+    padding-top: 16px;
+    border-top: 1px solid #f0f0f0;
+    margin-top: 20px;
+}
+
+.wssp-overview-card__section-label {
+    display: block;
+    font-size: 11px;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.wssp-overview-card__contacts {
+    display: flex;
+    gap: 48px;
+    flex-wrap: wrap;
+}
+
+.wssp-overview-card__contact {
+    flex: 1 1 280px;              /* grow, shrink, minimum width */
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    color: #888;
+}
+
+.wssp-overview-card__contact svg {
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.wssp-overview-card__contact-label {
+    display: block;
+    font-size: 12px;
+    color: #999;
+}
+
+.wssp-overview-card__contact-value {
+    display: block;
+    font-size: 14px;
+    color: #333;
+}
+
+/* ─── Add-on Pills ─── */
+.wssp-overview-card__addons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.wssp-addon-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    border: 1px solid #ddd;
+}
+
+.wssp-addon-pill--active {
+    background: #1a1a2e;
+    color: #fff;
+}
+
+.wssp-addon-pill--inactive {
+    background: transparent;
+    color: #aaa;
+    border: 1px solid #ddd;
+}
+
+.wssp-addon-pill--confirmed {
+    background: #1a1a2e;
+    color: #fff;
+}
+
+.wssp-addon-pill--requested {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.wssp-addon-pill--available {
+    background: transparent;
+    color: #aaa;
+}
+
+.wssp-addon-pill--declined {
+    background: #f5f5f5;
+    color: #999;
+    border: 1px solid #e0e0e0;
+    cursor: default;
+}
+
+/* ─── Task Progress Card ─── */
+.wssp-progress-card {
+    background: #fff;
+    border: 1px solid #e5e5e5;
+    border-radius: 12px;
+    padding: 24px;
+}
+
+.wssp-progress-card__title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin: 0 0 20px;
+}
+
+.wssp-progress-card__stat {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 0;
+    border-bottom: 1px solid #f5f5f5;
+}
+
+.wssp-progress-card__stat:last-child {
+    border-bottom: none;
+}
+
+.wssp-progress-card__icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.wssp-progress-card__icon--complete { background: #f0faf0; color: #22c55e; }
+.wssp-progress-card__icon--due      { background: #fff8f0; color: #f97316; }
+.wssp-progress-card__icon--overdue  { background: #fff5f5; color: #ef4444; }
+
+.wssp-progress-card__stat-label {
+    display: block;
+    font-size: 13px;
+    color: #888;
+}
+
+.wssp-progress-card__stat-value strong {
+    font-size: 28px;
+    font-weight: 700;
+    color: #1a1a2e;
+    line-height: 1;
+}
+
+.wssp-progress-card__stat-of {
+    font-size: 14px;
+    color: #aaa;
+    margin-left: 4px;
+}
+
+/* ═══════════════════════════════════════════════
+ * TASKS & DEADLINES SECTION
+ * ═══════════════════════════════════════════════ */
+.wssp-tasks-section {
+    margin-bottom: 40px;
+}
+
+.wssp-tasks-section__header {
+    margin-bottom: 20px;
+}
+
+.wssp-tasks-section__title {
+    font-size: 22px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin: 0 0 4px;
+}
+
+.wssp-tasks-section__subtitle {
+    font-size: 14px;
+    color: #888;
+    margin: 0;
+}
+
+/* ─── Phases ─── */
+.wssp-phases {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.wssp-phase {
+    background: #fff;
+    border: 1px solid #e5e5e5;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.wssp-phase--active {
+    border-color: #d0d0d0;
+}
+
+.wssp-phase--completed {
+    opacity: 0.75;
+}
+
+/* ─── Phase Header ─── */
+.wssp-phase__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px 0;
+    cursor: pointer;
+    user-select: none;
+}
+
+.wssp-phase__header:hover {
+    background: #fafafa;
+}
+
+.wssp-phase__header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.wssp-phase__number {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #f0f0f5;
+    color: #555;
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.wssp-phase--active .wssp-phase__number {
+    background: #1a1a2e;
+    color: #fff;
+}
+
+.wssp-phase--completed .wssp-phase__number {
+    background: #e8f8e8;
+    color: #22c55e;
+}
+
+.wssp-phase__header-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.wssp-phase__label {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a2e;
+}
+
+.wssp-phase__chevron {
+    transition: transform 0.2s ease;
+    color: #999;
+}
+
+.wssp-phase__header[aria-expanded="true"] .wssp-phase__chevron {
+    transform: rotate(180deg);
+}
+
+.wssp-phase__header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.wssp-phase__info-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1.5px solid #cbd5e1;
+    background: #fff;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.wssp-phase__info-btn:hover {
+    border-color: #1a1a2e;
+    color: #1a1a2e;
+    background: #f8f9fa;
+}
+
+.wssp-phase__info-btn:focus-visible {
+    outline: 2px solid #1a1a2e;
+    outline-offset: 2px;
+}
+
+/* ─── Phase Meta ─── */
+.wssp-phase__meta {
+    display: flex;
+    gap: 16px;
+    padding: 8px 20px 14px 64px;
+    font-size: 13px;
+    color: #888;
+}
+
+.wssp-phase__dates,
+.wssp-phase__progress {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.wssp-phase__progress--done {
+    color: #22c55e;
+}
+
+/* ─── Phase Body ─── */
+.wssp-phase__body {
+    padding: 0 20px 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.wssp-phase__footer {
+    padding: 16px 20px;
+    border-top: 1px solid #f0f0f0;
+    text-align: right;
+}
+
+/* ═══════════════════════════════════════════════
+ * TASK CARDS
+ * ═══════════════════════════════════════════════ */
+.wssp-task-card {
+    background: #fff;
+    border: 1px solid #ebebeb;
+    border-radius: 10px;
+    padding: 18px 20px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.wssp-task-card:hover {
+    border-color: #d5d5d5;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+.wssp-task-card--done {
+    background: #fcfcfc;
+}
+
+.wssp-task-card--done .wssp-task-card__title {
+    text-decoration: line-through;
+    color: #aaa;
+}
+
+.wssp-task-card--overdue {
+    border-color: #fecaca;
+}
+
+/* ─── Task Card Rows ─── */
+.wssp-task-card__row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.wssp-task-card__row--top {
+    margin-bottom: 4px;
+}
+
+.wssp-task-card__row--desc {
+    margin-bottom: 10px;
+}
+
+.wssp-task-card__row--bottom {
+    align-items: center;
+}
+
+.wssp-task-card__left {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+}
+
+.wssp-task-card__right {
+    flex-shrink: 0;
+    margin-left: 12px;
+}
+
+/* ─── Checkbox ─── */
+.wssp-task-card__checkbox {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+    margin-top: 1px;
+    cursor: pointer;
+}
+
+.wssp-task-card__checkbox input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.wssp-task-card__checkmark {
+    width: 22px;
+    height: 22px;
+    border: 2px solid #d0d0d0;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+}
+
+.wssp-task-card__checkbox--checked .wssp-task-card__checkmark {
+    background: #22c55e;
+    border-color: #22c55e;
+}
+
+.wssp-task-card__checkbox input:disabled ~ .wssp-task-card__checkmark {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.wssp-task-card__checkbox-spacer {
+    width: 24px;
+    flex-shrink: 0;
+}
+
+/* ─── Title Area ─── */
+.wssp-task-card__title-area {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.wssp-task-card__title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1a1a2e;
+}
+
+.wssp-task-card__description {
+    font-size: 14px;
+    color: #888;
+    margin: 0;
+    padding-left: 36px;
+}
+
+/* ─── Bottom Row ─── */
+.wssp-task-card__bottom-left {
+    padding-left: 36px;
+}
+
+.wssp-task-card__bottom-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ─── Status Tags (deadline area) ─── */
+.wssp-task-card__status-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    padding: 3px 10px;
+    border-radius: 5px;
+    font-weight: 500;
+}
+
+.wssp-task-card__status-tag--upcoming {
+    color: #888;
+    background: #f5f5f5;
+}
+
+.wssp-task-card__status-tag--overdue {
+    color: #dc2626;
+    background: #fef2f2;
+}
+
+.wssp-task-card__status-tag--completed {
+    color: #16a34a;
+    background: #f0fdf4;
+}
+
+/* ═══════════════════════════════════════════════
+ * BADGES
+ * ═══════════════════════════════════════════════ */
+.wssp-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.wssp-badge--session {
+    background: #1a1a2e;
+    color: #fff;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 13px;
+}
+
+.wssp-badge--outline {
+    background: transparent;
+    border: 1px solid #d0d0d0;
+    color: #555;
+}
+
+.wssp-badge--active    { background: #f0f0f5; color: #555; }
+.wssp-badge--upcoming  { background: #f0f0f5; color: #555; }
+.wssp-badge--completed { background: #f0fdf4; color: #16a34a; }
+
+.wssp-badge--review {
+    background: #fff7ed;
+    color: #ea580c;
+    border: 1px solid #fed7aa;
+}
+
+.wssp-badge--acknowledged {
+    background: #f0fdf4;
+    color: #16a34a;
+}
+
+.wssp-badge--overdue {
+    background: #fef2f2;
+    color: #dc2626;
+}
+
+.wssp-badge--priority-overdue {
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+}
+
+.wssp-badge--priority-high {
+    background: #fff7ed;
+    color: #c2410c;
+    border: 1px solid #fed7aa;
+}
+
+.wssp-badge--priority-medium {
+    background: #fefce8;
+    color: #a16207;
+    border: 1px solid #fde68a;
+}
+
+.wssp-badge--priority-low {
+    background: #f0f0f5;
+    color: #888;
+}
+
+/* ═══════════════════════════════════════════════
+ * BUTTONS
+ * ═══════════════════════════════════════════════ */
+.wssp-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: none;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.15s;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+.wssp-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.wssp-btn--primary {
+    background: #1a1a2e;
+    color: #fff;
+}
+
+.wssp-btn--primary:hover:not(:disabled) {
+    background: #2d2d4a;
+}
+
+.wssp-btn--outline {
+    background: transparent;
+    color: #555;
+    border: 1px solid #d0d0d0;
+}
+
+.wssp-btn--outline:hover:not(:disabled) {
+    background: #f5f5f5;
+}
+
+.wssp-btn--review {
+    background: #ea580c;
+    color: #fff;
+}
+
+.wssp-btn--review:hover:not(:disabled) {
+    background: #c2410c;
+}
+
+.wssp-btn--info {
+    background: transparent;
+    color: #555;
+    border: 1px solid #d0d0d0;
+}
+
+.wssp-btn--info:hover {
+    background: #f5f5f5;
+}
+
+.wssp-btn--form {
+    background: transparent;
+    color: #555;
+    border: 1px solid #d0d0d0;
+}
+
+.wssp-btn--form:hover {
+    background: #f5f5f5;
+    color: #333;
+}
+
+/* ═══════════════════════════════════════════════
+ * MODALS
+ * ═══════════════════════════════════════════════ */
+.wssp-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 9998;
+}
+
+.wssp-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.wssp-modal__dialog {
+    background: #fff;
+    border-radius: 16px;
+    max-width: 580px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 28px;
+    position: relative;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+}
+
+.wssp-modal__close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: none;
+    border: none;
+    color: #aaa;
+    cursor: pointer;
+    padding: 4px;
+}
+
+.wssp-modal__close:hover { color: #333; }
+
+/* ─── Modal Header ─── */
+.wssp-modal__header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 12px;
+}
+
+.wssp-modal__icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.wssp-modal__icon--review {
+    background: #eff6ff;
+    color: #3b82f6;
+}
+
+.wssp-modal__title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin: 0 0 6px;
+    line-height: 1.3;
+}
+
+.wssp-modal__tags {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.wssp-modal__description {
+    font-size: 14px;
+    color: #888;
+    margin: 0;
+}
+
+.wssp-modal__divider {
+    border: none;
+    border-top: 1px solid #eee;
+    margin: 20px 0;
+}
+
+/* ─── Modal Body ─── */
+.wssp-modal__body {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.wssp-modal__section-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin: 0 0 10px;
+}
+
+.wssp-modal__section-content {
+    font-size: 14px;
+    color: #555;
+    line-height: 1.6;
+}
+
+.wssp-modal__section-content p {
+    margin: 0 0 8px;
+}
+
+/* Guidelines: green check icons */
+.wssp-modal__guidelines ul,
+.wssp-modal__guidelines ol {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.wssp-modal__guidelines li {
+    padding: 4px 0 4px 28px;
+    position: relative;
+    color: #555;
+}
+
+.wssp-modal__guidelines li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    width: 18px;
+    height: 18px;
+    background: url("data:image/svg+xml,%3Csvg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2322c55e' stroke-width='2.5' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpolyline points='16 8.5 10.5 14.5 8 12'/%3E%3C/svg%3E") no-repeat;
+}
+
+/* Requirements: orange alert icons */
+.wssp-modal__requirements ul,
+.wssp-modal__requirements ol {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.wssp-modal__requirements li {
+    padding: 4px 0 4px 28px;
+    position: relative;
+    color: #555;
+}
+
+.wssp-modal__requirements li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    width: 18px;
+    height: 18px;
+    background: url("data:image/svg+xml,%3Csvg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%230f81e8' stroke-width='2.5' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpolyline points='16 8.5 10.5 14.5 8 12'/%3E%3C/svg%3E") no-repeat;
+}
+
+/* Resources: card style links */
+.wssp-modal__resources a {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #333;
+    margin-bottom: 8px;
+    transition: border-color 0.15s;
+}
+
+.wssp-modal__resources a:hover {
+    border-color: #999;
+}
+
+/* ─── Acknowledgment ─── */
+.wssp-modal__acknowledgment {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 16px;
+}
+
+.wssp-modal__ack-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #333;
+    line-height: 1.5;
+}
+
+.wssp-modal__ack-checkbox {
+    width: 20px;
+    height: 20px;
+    margin-top: 2px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.wssp-modal__ack-confirmed {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #16a34a;
+    font-weight: 500;
+}
+
+.wssp-modal__acknowledgment--confirmed {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+}
+
+.wssp-modal__acknowledgment--confirmed .wssp-modal__ack-text {
+    color: #15803d;
+    font-weight: 400;
+}
+
+.wssp-modal__footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+/* ═══════════════════════════════════════════════
+ * SESSION PICKER (multi-session users)
+ * ═══════════════════════════════════════════════ */
+.wssp-session-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 20px;
+}
+
+.wssp-session-card {
+    display: block;
+    padding: 20px;
+    background: #fff;
+    border: 1px solid #e5e5e5;
+    border-radius: 12px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.wssp-session-card:hover {
+    border-color: #aaa;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.wssp-session-card__code {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 4px;
+}
+
+.wssp-session-card__name {
+    font-size: 15px;
+    color: #333;
+    margin-bottom: 2px;
+}
+
+.wssp-session-card__type {
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 10px;
+}
+
+.wssp-session-card__role {
+    font-size: 12px;
+    color: #888;
+    margin-top: 8px;
+    text-transform: capitalize;
+}
+
+/* ─── Notices ─── */
+.wssp-notice {
+    padding: 15px 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    font-size: 15px;
+}
+
+.wssp-notice--error {
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+}
+
+.wssp-notice--info {
+    background: #eff6ff;
+    color: #2563eb;
+    border: 1px solid #bfdbfe;
+}
+
+.wssp-notice a {
+    color: inherit;
+    font-weight: 600;
+}
+
+/* Rollup status badges */
+.wssp-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.wssp-status--not_started    { background: #f0f0f0; color: #666; }
+.wssp-status--in_progress    { background: #fff7ed; color: #ea580c; }
+.wssp-status--action_needed  { background: #fef2f2; color: #dc2626; }
+.wssp-status--complete       { background: #f0fdf4; color: #16a34a; }
+
+/* ═══════════════════════════════════════════════
+ * RESPONSIVE
+ * ═══════════════════════════════════════════════ */
+@media (max-width: 900px) {
+    .wssp-overview-row {
+        grid-template-columns: 1fr;
+    }
+
+    .wssp-portal-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .wssp-portal-header__right {
+        flex-wrap: wrap;
+    }
+
+    .wssp-overview-card__details {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .wssp-overview-card__contacts {
+        flex-direction: column;
+        gap: 12px;
+    }
+    
+    .wssp-overview-card__detail,
+    .wssp-overview-card__contact {
+        flex: 1 1 100%;
+    }
+}
+
+@media (max-width: 1100px) {
+    .wssp-overview-row {
+        flex-direction: column;           /* Force stacking on narrow viewports */
+    }
+    
+    .wssp-overview-card {
+        width: 100%;
+    }
+    
+    /* Reduce gap when everything is stacked */
+    .wssp-overview-card__details,
+    .wssp-overview-card__contacts {
+        gap: 1.5rem;
+    }
+    
+    .wssp-overview-card__detail,
+    .wssp-overview-card__contact {
+        flex: 1 1 100%;                   /* Full width on very narrow screens */
+    }
+}
+
+/* Optional: Tighten spacing even more on mobile */
+@media (max-width: 640px) {
+    .wssp-overview-card__details,
+    .wssp-overview-card__contacts {
+        gap: 1.25rem;
+    }
+}
+
+@media (max-width: 600px) {
+    .wssp-portal {
+        padding: 0 12px 30px;
+    }
+
+    .wssp-task-card__row--bottom {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .wssp-task-card__bottom-right {
+        padding-left: 36px;
+    }
+
+    .wssp-modal__dialog {
+        padding: 20px;
+        border-radius: 12px;
+    }
+
+    .wssp-session-grid {
+        grid-template-columns: 1fr;
+    }
+}
