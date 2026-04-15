@@ -3,20 +3,24 @@
  * Report: Task Completion Matrix
  *
  * Variables provided by WSSP_Reports::render_task_completion():
- *   $sessions     — all sessions (id, session_code, short_name, event_type, rollup_status)
- *   $phases       — phase definitions with nested tasks (only if sessions exist)
- *   $task_columns — flat list of tasks to show as columns
- *   $status_map   — session_id => task_key => status
+ *   $sessions          — all sessions (id, session_code, short_name, event_type, rollup_status)
+ *   $phases            — phase definitions with nested tasks
+ *   $task_columns      — flat list of tasks to show as columns
+ *   $status_map        — session_id => task_key => status
+ *   $phase_detail_key  — selected phase slug for drill-down (or empty)
+ *   $phase_detail_data — drill-down data array (or null)
  *
  * @package WSSP
  */
 
 defined( 'ABSPATH' ) || exit;
+
+$report_url = admin_url( 'admin.php?page=wssp-report-tasks' );
 ?>
 
 <div class="wrap wssp-admin wssp-report">
     <h1>Task Completion Matrix</h1>
-    <p class="wssp-report__subtitle">At-a-glance view of task progress across all sessions.</p>
+    <p class="wssp-report__subtitle">At-a-glance view of task progress across all sessions. Click a phase header to drill into responses.</p>
 
     <?php if ( empty( $sessions ) ) : ?>
         <div class="wssp-card">
@@ -63,7 +67,6 @@ defined( 'ABSPATH' ) || exit;
                         <th class="wssp-report__matrix-session-header" rowspan="2">Session</th>
                         <th class="wssp-report__matrix-rollup-header" rowspan="2">Rollup</th>
                         <?php
-                        // Group task columns by phase for a grouped header row
                         $current_phase = '';
                         $phase_spans = array();
                         foreach ( $task_columns as $tc ) {
@@ -77,10 +80,20 @@ defined( 'ABSPATH' ) || exit;
                             $phase_spans[ $pk ]['count']++;
                         }
 
-                        foreach ( $phase_spans as $pk => $ps ) : ?>
+                        foreach ( $phase_spans as $pk => $ps ) :
+                            $is_active = ( $phase_detail_key === $pk );
+                        ?>
                             <th colspan="<?php echo esc_attr( $ps['count'] ); ?>"
-                                class="wssp-report__matrix-phase-header">
-                                <?php echo esc_html( $ps['label'] ); ?>
+                                class="wssp-report__matrix-phase-header <?php echo $is_active ? 'wssp-report__matrix-phase-header--active' : ''; ?>">
+                                <a href="<?php echo esc_url( add_query_arg( 'phase', $pk, $report_url ) ); ?>"
+                                   class="wssp-report__phase-link">
+                                    <?php echo esc_html( $ps['label'] ); ?>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                                         stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+                                         style="vertical-align: -1px; margin-left: 3px;">
+                                        <polyline points="6 9 12 15 18 9"/>
+                                    </svg>
+                                </a>
                             </th>
                         <?php endforeach; ?>
                     </tr>
@@ -122,9 +135,102 @@ defined( 'ABSPATH' ) || exit;
         </div>
     </div>
 
+    <!-- ═══════════════════════════════════════════
+         Phase Detail Drill-Down
+         ═══════════════════════════════════════════ -->
+    <?php if ( $phase_detail_data ) : ?>
+        <div class="wssp-card wssp-report__phase-detail" id="phase-detail">
+            <div class="wssp-report__phase-detail-header">
+                <h2><?php echo esc_html( $phase_detail_data['phase_label'] ); ?> — Detail View</h2>
+                <a href="<?php echo esc_url( $report_url ); ?>" class="button">✕ Close Detail</a>
+            </div>
+            <p class="wssp-report__subtitle">
+                Showing responses for <?php echo count( $sessions ); ?> sessions across <?php echo count( $phase_detail_data['tasks'] ); ?> tasks.
+            </p>
+
+            <div class="wssp-report__phase-detail-scroll">
+                <table class="wp-list-table widefat fixed striped wssp-report__detail-table">
+                    <thead>
+                        <tr>
+                            <th class="wssp-report__detail-session-col">Session</th>
+                            <th class="wssp-report__detail-task-col">Task</th>
+                            <th class="wssp-report__detail-status-col">Status</th>
+                            <th class="wssp-report__detail-response-col">Response / File</th>
+                            <th class="wssp-report__detail-when-col">Last Changed</th>
+                            <th class="wssp-report__detail-who-col">By</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ( $sessions as $s ) :
+                            $sid       = (int) $s['id'];
+                            $row_data  = $phase_detail_data['rows'][ $sid ] ?? array();
+                            $num_tasks = count( $phase_detail_data['tasks'] );
+                            $first     = true;
+                        ?>
+                            <?php foreach ( $phase_detail_data['tasks'] as $task ) :
+                                $tk   = $task['key'];
+                                $cell = $row_data[ $tk ] ?? array( 'status' => 'not_started', 'response' => '', 'last_changed' => '', 'changed_by' => '' );
+                            ?>
+                                <tr class="wssp-report__detail-row wssp-report__detail-row--<?php echo esc_attr( $cell['status'] ); ?>">
+                                    <?php if ( $first ) : ?>
+                                        <td class="wssp-report__detail-session-cell" rowspan="<?php echo $num_tasks; ?>">
+                                            <a href="<?php echo esc_url( admin_url( 'admin.php?page=wssp-manage-session&session_id=' . $sid ) ); ?>">
+                                                <strong><?php echo esc_html( $s['session_code'] ); ?></strong>
+                                            </a>
+                                            <span class="wssp-report__matrix-name"><?php echo esc_html( $s['short_name'] ); ?></span>
+                                        </td>
+                                    <?php endif; ?>
+                                    <td><?php echo esc_html( $task['label'] ); ?></td>
+                                    <td>
+                                        <span class="wssp-report__dot wssp-report__dot--<?php echo esc_attr( $cell['status'] ); ?>"
+                                              title="<?php echo esc_attr( ucwords( str_replace( '_', ' ', $cell['status'] ) ) ); ?>"></span>
+                                        <span class="wssp-report__detail-status-label">
+                                            <?php echo esc_html( ucwords( str_replace( '_', ' ', $cell['status'] ) ) ); ?>
+                                        </span>
+                                    </td>
+                                    <td class="wssp-report__detail-response">
+                                        <?php if ( $cell['response'] ) : ?>
+                                            <span title="<?php echo esc_attr( $cell['response'] ); ?>">
+                                                <?php echo esc_html( mb_strlen( $cell['response'] ) > 60 ? mb_substr( $cell['response'], 0, 60 ) . '…' : $cell['response'] ); ?>
+                                            </span>
+                                        <?php else : ?>
+                                            <span class="wssp-report__detail-empty">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="wssp-report__detail-when">
+                                        <?php if ( $cell['last_changed'] ) :
+                                            $ts = strtotime( $cell['last_changed'] );
+                                        ?>
+                                            <?php echo esc_html( date( 'M j', $ts ) ); ?>
+                                            <span class="wssp-report__time"><?php echo esc_html( date( 'g:ia', $ts ) ); ?></span>
+                                        <?php else : ?>
+                                            —
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><?php echo esc_html( $cell['changed_by'] ?: '—' ); ?></td>
+                                </tr>
+                            <?php
+                                $first = false;
+                            endforeach; ?>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <script>
+        // Auto-scroll to the detail panel when it's present
+        document.addEventListener('DOMContentLoaded', function() {
+            var detail = document.getElementById('phase-detail');
+            if (detail) {
+                detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
+        </script>
+    <?php endif; ?>
+
     <!-- ─── Summary stats ─── -->
     <?php
-    // Calculate completion stats per task
     $task_stats = array();
     $session_count = count( $sessions );
     foreach ( $task_columns as $tc ) {

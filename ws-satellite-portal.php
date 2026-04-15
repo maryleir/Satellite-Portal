@@ -56,6 +56,8 @@ spl_autoload_register( function ( $class ) {
  * HELPERS (non-class functions)
  * ─────────────────────────────────────────── */
 require_once WSSP_PLUGIN_DIR . 'includes/wssp-render-helpers.php';
+require_once WSSP_PLUGIN_DIR . 'wssp-diagnostic.php';
+
 
 
 /* ───────────────────────────────────────────
@@ -118,7 +120,7 @@ add_action( 'plugins_loaded', function () {
     $dashboard    = new WSSP_Dashboard( $config, $access, $audit );
     $task_content = new WSSP_Task_Content( $config );
     $session_meta = new WSSP_Session_Meta();
-    $smartsheet   = new WSSP_Smartsheet( $config, $session_meta );
+    $smartsheet   = new WSSP_Smartsheet( $config, $session_meta, $audit );
     $file_uploads = new WSSP_REST_File_Uploads( $access, $config, $audit );
 
 
@@ -131,7 +133,7 @@ add_action( 'plugins_loaded', function () {
     // Admin — task content editing now lives in the WSSP Task Content plugin
     if ( is_admin() ) {
         new WSSP_Admin( $config, $access, $audit, $session_meta, $smartsheet, $formidable, $dates_smartsheet );
-        new WSSP_Reports( $config, $audit );
+        new WSSP_Reports( $config, $audit, $session_meta, $formidable );
     }
 
     // Public-facing — pass $formidable so session-overview.php, task surfacing, progress tracking, etc. can merge data cleanly

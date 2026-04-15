@@ -69,6 +69,10 @@ class WSSP_Admin {
         add_action( 'admin_post_wssp_smartsheet_pull_all',  array( $this, 'handle_smartsheet_pull_all' ) );
         add_action( 'admin_post_wssp_smartsheet_push',      array( $this, 'handle_smartsheet_push' ) );
         
+        add_action( 'admin_post_wssp_smartsheet_pull_confirm', array( $this, 'handle_smartsheet_pull_confirm' ) );
+        add_action( 'admin_post_wssp_smartsheet_pull_all_confirm', array( $this, 'handle_smartsheet_pull_all_confirm' ) );
+
+        
         // Add the sync handler and report page
         add_action( 'admin_post_wssp_sync_dates', array( $this, 'handle_sync_dates' ) );
 
@@ -458,14 +462,64 @@ class WSSP_Admin {
      * ─────────────────────────────────────────── */
     
     /**
-     * Pull a single session from Smartsheet.
+     * Pull a single session from Smartsheet — DRY RUN first.
+     *
+     * Shows a preview of what will change, then the admin confirms.
      */
-    public function handle_smartsheet_pull() {
-        check_admin_referer( 'wssp_smartsheet_pull' );
+public function handle_smartsheet_pull() {
+    check_admin_referer( 'wssp_smartsheet_pull' );
+    if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized.' );
+ 
+    $session_id = absint( $_POST['session_id'] ?? 0 );
+ 
+    // Step 1: Dry run — show preview
+    $result = $this->smartsheet->pull_session( $session_id, true );
+ 
+    // DEBUG: Log the full result to wp-content/debug.log
+    // Remove this line once debugging is complete
+    error_log( 'WSSP SS Pull Dry Run (session ' . $session_id . '): ' . wp_json_encode( $result, JSON_PRETTY_PRINT ) );
+ 
+    if ( ! $result['success'] ) {
+        $msg = urlencode( $result['message'] );
+        wp_safe_redirect( admin_url(
+            "admin.php?page=wssp-manage-session&session_id={$session_id}&ss_error=1&ss_msg={$msg}"
+        ));
+        exit;
+    }
+ 
+    // If nothing would change AND nothing was skipped, no preview needed
+    if ( empty( $result['diff'] ) && empty( $result['skipped_fields'] ) ) {
+        $msg = urlencode( 'No changes — portal data already matches Smartsheet.' );
+        wp_safe_redirect( admin_url(
+            "admin.php?page=wssp-manage-session&session_id={$session_id}&ss_pulled=1&ss_msg={$msg}"
+        ));
+        exit;
+    }
+ 
+    // Store the preview in a transient so the confirm step doesn't need another API call
+    set_transient( 'wssp_ss_preview_' . $session_id, $result, 300 ); // 5 min TTL
+ 
+    // Redirect to the session page with preview flag
+    wp_safe_redirect( admin_url(
+        "admin.php?page=wssp-manage-session&session_id={$session_id}&ss_preview=1"
+    ));
+    exit;
+}
+
+    /**
+     * Confirm and commit a single session pull after preview.
+     */
+    public function handle_smartsheet_pull_confirm() {
+        check_admin_referer( 'wssp_smartsheet_pull_confirm' );
         if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized.' );
  
         $session_id = absint( $_POST['session_id'] ?? 0 );
-        $result = $this->smartsheet->pull_session( $session_id );
+ 
+        // Clear the preview transient
+        delete_transient( 'wssp_ss_preview_' . $session_id );
+ 
+        // Commit the pull (not dry run)
+        $result = $this->smartsheet->pull_session( $session_id, false );
  
         $status = $result['success'] ? 'ss_pulled' : 'ss_error';
         $msg    = urlencode( $result['message'] );
@@ -477,13 +531,58 @@ class WSSP_Admin {
     }
  
     /**
-     * Pull ALL sessions from Smartsheet.
+     * Pull ALL sessions from Smartsheet — DRY RUN first.
      */
     public function handle_smartsheet_pull_all() {
         check_admin_referer( 'wssp_smartsheet_pull_all' );
         if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized.' );
  
-        $result = $this->smartsheet->pull_all_sessions();
+        // Step 1: Dry run
+        $result = $this->smartsheet->pull_all_sessions( true );
+ 
+        if ( ! $result['success'] ) {
+            $msg = urlencode( $result['message'] );
+            wp_safe_redirect( admin_url(
+                "admin.php?page=wssp-dashboard&ss_error=1&ss_msg={$msg}"
+            ));
+            exit;
+        }
+ 
+        // Check if there's anything to do
+        $total_changes = 0;
+        foreach ( $result['results'] ?? array() as $r ) {
+            $total_changes += $r['changes'] ?? 0;
+        }
+        $would_create = $result['would_create'] ?? array();
+ 
+        if ( $total_changes === 0 && empty( $would_create ) ) {
+            $msg = urlencode( 'No changes — all sessions already match Smartsheet.' );
+            wp_safe_redirect( admin_url(
+                "admin.php?page=wssp-dashboard&ss_pulled_all=1&ss_msg={$msg}"
+            ));
+            exit;
+        }
+ 
+        // Store preview
+        set_transient( 'wssp_ss_preview_all', $result, 300 );
+ 
+        wp_safe_redirect( admin_url(
+            "admin.php?page=wssp-dashboard&ss_preview_all=1"
+        ));
+        exit;
+    }
+ 
+    /**
+     * Confirm and commit a pull-all after preview.
+     */
+    public function handle_smartsheet_pull_all_confirm() {
+        check_admin_referer( 'wssp_smartsheet_pull_all_confirm' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized.' );
+ 
+        delete_transient( 'wssp_ss_preview_all' );
+ 
+        // Commit
+        $result = $this->smartsheet->pull_all_sessions( false );
  
         $status = $result['success'] ? 'ss_pulled_all' : 'ss_error';
         $count  = count( $result['results'] ?? array() );
@@ -513,6 +612,7 @@ class WSSP_Admin {
         ));
         exit;
     }
+
     
     public function handle_sync_dates() {
         check_admin_referer( 'wssp_sync_dates' );

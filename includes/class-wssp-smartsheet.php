@@ -6,6 +6,12 @@
  *   - Pull: SS → portal (admin-entered session data)
  *   - Push: portal → SS (sponsor-entered form data)
  *
+ * Safety features:
+ *   - Dry-run mode: preview what will change before committing
+ *   - Empty value protection: blank SS cells won't overwrite existing portal data
+ *   - Per-field audit trail: every pull/push logs what changed, old → new
+ *   - Session creation logging: auto-created sessions are audit-logged
+ *
  * Uses the field mapping from config/smartsheet-field-map.php.
  *
  * @package WSSP
@@ -21,6 +27,9 @@ class WSSP_Smartsheet {
     /** @var WSSP_Session_Meta */
     private $session_meta;
 
+    /** @var WSSP_Audit_Log|null */
+    private $audit;
+
     /** @var string API base URL. */
     private $api_base = 'https://api.smartsheet.com/2.0';
 
@@ -30,10 +39,11 @@ class WSSP_Smartsheet {
     /** @var array Field mapping config. */
     private $field_map;
 
-    public function __construct( WSSP_Config $config, WSSP_Session_Meta $session_meta ) {
+    public function __construct( WSSP_Config $config, WSSP_Session_Meta $session_meta, WSSP_Audit_Log $audit = null ) {
         $this->config       = $config;
         $this->session_meta = $session_meta;
-        $this->api_token = defined( 'WSSP_SMARTSHEET_TOKEN' ) ? WSSP_SMARTSHEET_TOKEN : '';
+        $this->audit        = $audit;
+        $this->api_token    = defined( 'WSSP_SMARTSHEET_TOKEN' ) ? WSSP_SMARTSHEET_TOKEN : '';
         $this->field_map    = $this->config->get_smartsheet_map();
     }
 
@@ -44,13 +54,22 @@ class WSSP_Smartsheet {
     /**
      * Pull data from Smartsheet for a single session.
      *
-     * Finds the row matching the session_code, reads all pull-direction
-     * columns, and writes to session meta (or session table).
+     * In dry_run mode, returns a diff of what would change without
+     * writing anything. This lets the admin preview before committing.
      *
-     * @param int $session_id
-     * @return array  [ 'success' => bool, 'message' => string, 'updated' => int ]
+     * @param int  $session_id
+     * @param bool $dry_run  If true, compute diff only — don't write.
+     * @return array {
+     *     @type bool   $success
+     *     @type string $message
+     *     @type int    $updated      Number of fields changed (0 in dry_run).
+     *     @type array  $diff         Field-level changes: [ { field, old, new, store, ss_title } ]
+     *     @type bool   $dry_run      Whether this was a preview.
+     *     @type string $row_id       Smartsheet row ID.
+     *     @type int    $skipped      Fields skipped due to empty value protection.
+     * }
      */
-    public function pull_session( $session_id ) {
+    public function pull_session( $session_id, $dry_run = false ) {
         if ( empty( $this->api_token ) ) {
             return array( 'success' => false, 'message' => 'Smartsheet API token not configured.', 'updated' => 0 );
         }
@@ -59,7 +78,6 @@ class WSSP_Smartsheet {
             return array( 'success' => false, 'message' => 'Smartsheet field mapping not configured.', 'updated' => 0 );
         }
 
-        // Get the session
         global $wpdb;
         $session = $wpdb->get_row( $wpdb->prepare(
             "SELECT * FROM {$wpdb->prefix}wssp_sessions WHERE id = %d",
@@ -84,12 +102,6 @@ class WSSP_Smartsheet {
             return array( 'success' => false, 'message' => 'API error: ' . $sheet_data->get_error_message(), 'updated' => 0 );
         }
 
-        // Build column ID → index lookup
-        $col_lookup = array();
-        foreach ( $sheet_data['columns'] ?? array() as $col ) {
-            $col_lookup[ $col['id'] ] = $col;
-        }
-
         // Find the row matching this session_code
         $match_col_id = $match_col['ss_column_id'];
         $target_row   = null;
@@ -110,6 +122,32 @@ class WSSP_Smartsheet {
             return array( 'success' => false, 'message' => "No row found for session code: {$session_code}", 'updated' => 0 );
         }
 
+        // Build cell value lookup
+        $cell_values = array();
+        foreach ( $target_row['cells'] as $cell ) {
+            $cell_values[ $cell['columnId'] ] = $cell;
+        }
+
+        // Build proposed changes with diff
+        $columns = $this->field_map['columns'] ?? array();
+        $result  = $this->compute_pull_diff( $session_id, $session, $columns, $cell_values );
+
+        if ( $dry_run ) {
+            return array(
+                'success'        => true,
+                'dry_run'        => true,
+                'message'        => count( $result['diff'] ) . ' field(s) would change. ' . $result['skipped'] . ' skipped (empty value protection).',
+                'updated'        => 0,
+                'diff'           => $result['diff'],
+                'skipped'        => $result['skipped'],
+                'skipped_fields' => $result['skipped_fields'],
+                'raw_values'     => $result['raw_values'],
+                'row_id'         => $target_row['id'] ?? null,
+            );
+        }
+
+        // ─── Commit the changes ───
+
         // Store the row ID for future push operations
         if ( ! empty( $target_row['id'] ) ) {
             $wpdb->update(
@@ -121,68 +159,29 @@ class WSSP_Smartsheet {
             );
         }
 
-        // Build cell value lookup: column_id => value
-        $cell_values = array();
-        foreach ( $target_row['cells'] as $cell ) {
-            $cell_values[ $cell['columnId'] ] = $cell;
-        }
-
-        // Process each pull-direction mapping
-        $columns    = $this->field_map['columns'] ?? array();
-        $meta_updates   = array();
-        $session_updates = array();
-        $updated = 0;
-
-        foreach ( $columns as $mapping ) {
-            if ( ! in_array( $mapping['direction'], array( 'pull', 'both' ), true ) ) {
-                continue;
-            }
-            if ( $mapping['portal_store'] === 'skip' ) {
-                continue;
-            }
-
-            $col_id = $mapping['ss_column_id'];
-            $cell   = $cell_values[ $col_id ] ?? null;
-            $value  = $this->extract_cell_value( $cell, $mapping );
-
-            if ( $mapping['portal_store'] === 'meta' ) {
-                $meta_updates[ $mapping['portal_key'] ] = $value;
-            } elseif ( $mapping['portal_store'] === 'session' ) {
-                $session_updates[ $mapping['portal_key'] ] = $value;
-            }
-        }
-
-        // Write meta
-        if ( ! empty( $meta_updates ) ) {
-            $updated += $this->session_meta->update_many( $session_id, $meta_updates );
-        }
-
-        // Write session table fields
-        if ( ! empty( $session_updates ) ) {
-            $wpdb->update(
-                $wpdb->prefix . 'wssp_sessions',
-                $session_updates,
-                array( 'id' => $session_id )
-            );
-            $updated += count( $session_updates );
-        }
+        $updated = $this->apply_pull_changes( $session_id, $session, $result );
 
         return array(
-            'success' => true,
-            'message' => "Pulled {$updated} fields from Smartsheet.",
-            'updated' => $updated,
-            'row_id'  => $target_row['id'] ?? null,
+            'success'  => true,
+            'dry_run'  => false,
+            'message'  => "Pulled {$updated} fields from Smartsheet." . ( $result['skipped'] > 0 ? " {$result['skipped']} skipped (empty protection)." : '' ),
+            'updated'  => $updated,
+            'diff'     => $result['diff'],
+            'skipped'  => $result['skipped'],
+            'row_id'   => $target_row['id'] ?? null,
         );
     }
 
     /**
      * Pull data for ALL sessions at once.
      *
-     * Fetches the sheet once and syncs all matching sessions.
+     * In dry_run mode, returns what would change per session plus
+     * which new sessions would be created.
      *
-     * @return array  [ 'success' => bool, 'message' => string, 'results' => array ]
+     * @param bool $dry_run  If true, preview only.
+     * @return array
      */
-    public function pull_all_sessions() {
+    public function pull_all_sessions( $dry_run = false ) {
         if ( empty( $this->api_token ) || empty( $this->field_map ) ) {
             return array( 'success' => false, 'message' => 'Not configured.', 'results' => array() );
         }
@@ -190,30 +189,27 @@ class WSSP_Smartsheet {
         $sheet_id  = $this->field_map['sheet_id'] ?? '';
         $match_col = $this->field_map['match_column'] ?? array();
 
-        // Fetch entire sheet
         $sheet_data = $this->api_get( "/sheets/{$sheet_id}" );
         if ( is_wp_error( $sheet_data ) ) {
             return array( 'success' => false, 'message' => 'API error: ' . $sheet_data->get_error_message(), 'results' => array() );
         }
 
-        // Get all sessions
         global $wpdb;
         $sessions = $wpdb->get_results(
             "SELECT * FROM {$wpdb->prefix}wssp_sessions",
             ARRAY_A
         );
 
-        // Index sessions by session_code
         $sessions_by_code = array();
         foreach ( $sessions as $s ) {
             $sessions_by_code[ strtoupper( $s['session_code'] ) ] = $s;
         }
 
-        // Index rows by match column value
-        $match_col_id = $match_col['ss_column_id'];
-        $columns      = $this->field_map['columns'] ?? array();
-        $results      = array();
+        $match_col_id  = $match_col['ss_column_id'];
+        $columns       = $this->field_map['columns'] ?? array();
+        $results       = array();
         $created_count = 0;
+        $would_create  = array();
 
         foreach ( $sheet_data['rows'] ?? array() as $row ) {
             $row_code = '';
@@ -228,28 +224,20 @@ class WSSP_Smartsheet {
                 continue;
             }
 
-            // If no matching session exists, create one
+            // ─── Handle new sessions ───
             if ( ! isset( $sessions_by_code[ $row_code ] ) ) {
-                // Extract sponsor name from this row for the short_name
-                $sponsor_col_id = null;
-                foreach ( $columns as $mapping ) {
-                    if ( $mapping['portal_key'] === 'short_name' && $mapping['portal_store'] === 'session' ) {
-                        $sponsor_col_id = $mapping['ss_column_id'];
-                        break;
-                    }
+                // Extract sponsor name for context
+                $short_name = $this->extract_short_name_from_row( $row, $columns );
+
+                if ( $dry_run ) {
+                    $would_create[] = array(
+                        'session_code' => $row_code,
+                        'short_name'   => $short_name,
+                    );
+                    continue;
                 }
 
-                $short_name = '';
-                if ( $sponsor_col_id ) {
-                    foreach ( $row['cells'] as $cell ) {
-                        if ( $cell['columnId'] == $sponsor_col_id ) {
-                            $short_name = trim( $cell['displayValue'] ?? $cell['value'] ?? '' );
-                            break;
-                        }
-                    }
-                }
-
-                // Generate a unique session key
+                // Create the session
                 $session_key = substr( bin2hex( random_bytes( 4 ) ), 0, 8 );
 
                 $wpdb->insert(
@@ -268,7 +256,23 @@ class WSSP_Smartsheet {
                 $new_id = $wpdb->insert_id;
                 if ( ! $new_id ) continue;
 
-                // Add to lookup so the sync below can process it
+                // Audit log: session auto-created
+                if ( $this->audit ) {
+                    $this->audit->log( array(
+                        'session_id'  => $new_id,
+                        'event_type'  => 'satellite',
+                        'action'      => 'session_created',
+                        'source'      => 'smartsheet',
+                        'entity_type' => 'session',
+                        'entity_id'   => $new_id,
+                        'new_value'   => $row_code,
+                        'meta'        => array(
+                            'trigger'    => 'pull_all_auto_create',
+                            'short_name' => $short_name,
+                        ),
+                    ));
+                }
+
                 $session = array(
                     'id'                => $new_id,
                     'session_code'      => $row_code,
@@ -281,11 +285,11 @@ class WSSP_Smartsheet {
                 $created_count++;
             }
 
-            $session = $sessions_by_code[ $row_code ];
+            $session    = $sessions_by_code[ $row_code ];
             $session_id = $session['id'];
 
             // Store row ID
-            if ( ! empty( $row['id'] ) ) {
+            if ( ! $dry_run && ! empty( $row['id'] ) ) {
                 $wpdb->update(
                     $wpdb->prefix . 'wssp_sessions',
                     array( 'smartsheet_row_id' => (string) $row['id'] ),
@@ -301,36 +305,39 @@ class WSSP_Smartsheet {
                 $cell_values[ $cell['columnId'] ] = $cell;
             }
 
-            // Process pull columns
-            $meta_updates = array();
-            $session_updates = array();
+            // Compute diff
+            $diff_result = $this->compute_pull_diff( $session_id, $session, $columns, $cell_values );
 
-            foreach ( $columns as $mapping ) {
-                if ( ! in_array( $mapping['direction'], array( 'pull', 'both' ), true ) ) continue;
-                if ( $mapping['portal_store'] === 'skip' ) continue;
-
-                $cell  = $cell_values[ $mapping['ss_column_id'] ] ?? null;
-                $value = $this->extract_cell_value( $cell, $mapping );
-
-                if ( $mapping['portal_store'] === 'meta' ) {
-                    $meta_updates[ $mapping['portal_key'] ] = $value;
-                } elseif ( $mapping['portal_store'] === 'session' ) {
-                    $session_updates[ $mapping['portal_key'] ] = $value;
-                }
+            if ( $dry_run ) {
+                $results[] = array(
+                    'session_code'   => $session['session_code'],
+                    'changes'        => count( $diff_result['diff'] ),
+                    'skipped'        => $diff_result['skipped'],
+                    'skipped_fields' => $diff_result['skipped_fields'],
+                    'diff'           => $diff_result['diff'],
+                );
+                continue;
             }
 
-            $count = 0;
-            if ( ! empty( $meta_updates ) ) {
-                $count += $this->session_meta->update_many( $session_id, $meta_updates );
-            }
-            if ( ! empty( $session_updates ) ) {
-                $wpdb->update( $wpdb->prefix . 'wssp_sessions', $session_updates, array( 'id' => $session_id ) );
-                $count += count( $session_updates );
-            }
+            // Apply changes
+            $count = $this->apply_pull_changes( $session_id, $session, $diff_result );
 
             $results[] = array(
                 'session_code' => $session['session_code'],
                 'updated'      => $count,
+                'skipped'      => $diff_result['skipped'],
+            );
+        }
+
+        if ( $dry_run ) {
+            $total_changes = array_sum( array_column( $results, 'changes' ) );
+            return array(
+                'success'      => true,
+                'dry_run'      => true,
+                'message'      => "{$total_changes} field(s) would change across " . count( $results ) . ' sessions.',
+                'results'      => $results,
+                'would_create' => $would_create,
+                'created'      => 0,
             );
         }
 
@@ -340,10 +347,12 @@ class WSSP_Smartsheet {
         }
 
         return array(
-            'success' => true,
-            'message' => $msg,
-            'results' => $results,
-            'created' => $created_count,
+            'success'      => true,
+            'dry_run'      => false,
+            'message'      => $msg,
+            'results'      => $results,
+            'created'      => $created_count,
+            'would_create' => array(),
         );
     }
 
@@ -376,7 +385,6 @@ class WSSP_Smartsheet {
         $sheet_id = $this->field_map['sheet_id'] ?? '';
 
         if ( ! $row_id ) {
-            // Try to find the row first
             $pull_result = $this->pull_session( $session_id );
             $row_id = $pull_result['row_id'] ?? '';
             if ( ! $row_id ) {
@@ -388,6 +396,7 @@ class WSSP_Smartsheet {
         $cells    = array();
         $columns  = $this->field_map['columns'] ?? array();
         $meta     = $this->session_meta->get_all( $session_id );
+        $pushed_fields = array();
 
         foreach ( $columns as $mapping ) {
             if ( ! in_array( $mapping['direction'], array( 'push', 'both' ), true ) ) continue;
@@ -400,7 +409,6 @@ class WSSP_Smartsheet {
             } elseif ( $mapping['portal_store'] === 'session' ) {
                 $value = $session[ $mapping['portal_key'] ] ?? '';
             } elseif ( $mapping['portal_store'] === 'formidable' ) {
-                // Look up the Formidable field value for this session
                 $value = $this->get_formidable_value( $session, $mapping['portal_key'] );
             }
 
@@ -409,6 +417,7 @@ class WSSP_Smartsheet {
                     'columnId' => $mapping['ss_column_id'],
                     'value'    => $this->format_for_smartsheet( $value, $mapping ),
                 );
+                $pushed_fields[] = $mapping['portal_key'];
             }
         }
 
@@ -416,7 +425,6 @@ class WSSP_Smartsheet {
             return array( 'success' => true, 'message' => 'No fields to push.' );
         }
 
-        // Update the row
         $result = $this->api_put( "/sheets/{$sheet_id}/rows", array(
             array(
                 'id'    => (int) $row_id,
@@ -428,7 +436,219 @@ class WSSP_Smartsheet {
             return array( 'success' => false, 'message' => 'API error: ' . $result->get_error_message() );
         }
 
+        // Audit log
+        if ( $this->audit ) {
+            $this->audit->log( array(
+                'session_id'  => $session_id,
+                'event_type'  => $session['event_type'] ?? 'satellite',
+                'action'      => 'smartsheet_push',
+                'source'      => 'smartsheet',
+                'entity_type' => 'session',
+                'entity_id'   => $session_id,
+                'new_value'   => wp_json_encode( $pushed_fields ),
+                'meta'        => array(
+                    'fields_pushed' => count( $cells ),
+                    'row_id'        => $row_id,
+                ),
+            ));
+        }
+
         return array( 'success' => true, 'message' => 'Pushed ' . count( $cells ) . ' fields to Smartsheet.' );
+    }
+
+    /* ───────────────────────────────────────────
+     * DIFF + APPLY — Core pull logic
+     * ─────────────────────────────────────────── */
+
+    /**
+     * Compute a field-level diff between Smartsheet values and portal state.
+     *
+     * Returns the proposed changes without writing anything.
+     * Also enforces empty value protection: if the Smartsheet cell is blank
+     * and the portal already has a non-empty value, the field is skipped.
+     *
+     * @param int   $session_id
+     * @param array $session       Session row from DB.
+     * @param array $columns       Field mapping columns.
+     * @param array $cell_values   column_id => cell data from Smartsheet.
+     * @return array {
+     *     @type array $diff           Changes to apply: [ { field, old, new, store, ss_title } ]
+     *     @type array $meta_updates   meta key => new value (only changed fields).
+     *     @type array $session_updates session column => new value (only changed fields).
+     *     @type int   $skipped        Number of fields skipped by empty protection.
+     * }
+     */
+    private function compute_pull_diff( $session_id, $session, $columns, $cell_values ) {
+        // Load current meta values for comparison
+        $current_meta = $this->session_meta->get_all( $session_id );
+
+        $diff            = array();
+        $meta_updates    = array();
+        $session_updates = array();
+        $skipped         = 0;
+        $skipped_fields  = array();
+        $raw_values      = array(); // Debug: capture every pull-direction field's raw + mapped values
+
+        foreach ( $columns as $mapping ) {
+            if ( ! in_array( $mapping['direction'], array( 'pull', 'both' ), true ) ) {
+                continue;
+            }
+            if ( $mapping['portal_store'] === 'skip' ) {
+                continue;
+            }
+
+            $col_id    = $mapping['ss_column_id'];
+            $cell      = $cell_values[ $col_id ] ?? null;
+            $new_value = $this->extract_cell_value( $cell, $mapping );
+            $key       = $mapping['portal_key'];
+            $store     = $mapping['portal_store'];
+            $ss_title  = $mapping['ss_title'] ?? $key;
+
+            // Get current portal value
+            $old_value = '';
+            if ( $store === 'meta' ) {
+                $old_value = (string) ( $current_meta[ $key ] ?? '' );
+            } elseif ( $store === 'session' ) {
+                $old_value = (string) ( $session[ $key ] ?? '' );
+            }
+
+            // Capture raw API data for debugging
+            $raw_values[] = array(
+                'field'        => $key,
+                'ss_title'     => $ss_title,
+                'type'         => $mapping['type'] ?? 'text',
+                'raw_value'    => $cell['value'] ?? null,
+                'display_value' => $cell['displayValue'] ?? null,
+                'mapped_value' => $new_value,
+                'portal_value' => $old_value,
+                'outcome'      => '', // filled below
+            );
+            $raw_idx = count( $raw_values ) - 1;
+
+            // ─── Empty value protection ───
+            // Don't overwrite existing portal data with a blank Smartsheet cell.
+            if ( $new_value === '' && $old_value !== '' ) {
+                $skipped++;
+                $skipped_fields[] = array(
+                    'field'          => $key,
+                    'ss_title'       => $ss_title,
+                    'protected_value' => $old_value,
+                );
+                $raw_values[ $raw_idx ]['outcome'] = 'skipped (empty protection)';
+                continue;
+            }
+
+            // Skip if no actual change
+            if ( (string) $new_value === $old_value ) {
+                $raw_values[ $raw_idx ]['outcome'] = 'no change';
+                continue;
+            }
+
+            $raw_values[ $raw_idx ]['outcome'] = 'changed';
+
+            $diff[] = array(
+                'field'    => $key,
+                'old'      => $old_value,
+                'new'      => $new_value,
+                'store'    => $store,
+                'ss_title' => $ss_title,
+            );
+
+            if ( $store === 'meta' ) {
+                $meta_updates[ $key ] = $new_value;
+            } elseif ( $store === 'session' ) {
+                $session_updates[ $key ] = $new_value;
+            }
+        }
+
+        return array(
+            'diff'            => $diff,
+            'meta_updates'    => $meta_updates,
+            'session_updates' => $session_updates,
+            'skipped'         => $skipped,
+            'skipped_fields'  => $skipped_fields,
+            'raw_values'      => $raw_values,
+        );
+    }
+
+    /**
+     * Apply pull changes to the portal and log each field change.
+     *
+     * @param int   $session_id
+     * @param array $session      Session row.
+     * @param array $diff_result  Output from compute_pull_diff().
+     * @return int  Number of fields updated.
+     */
+    private function apply_pull_changes( $session_id, $session, $diff_result ) {
+        global $wpdb;
+        $updated = 0;
+
+        // Write meta
+        if ( ! empty( $diff_result['meta_updates'] ) ) {
+            $updated += $this->session_meta->update_many( $session_id, $diff_result['meta_updates'] );
+        }
+
+        // Write session table fields
+        if ( ! empty( $diff_result['session_updates'] ) ) {
+            $wpdb->update(
+                $wpdb->prefix . 'wssp_sessions',
+                $diff_result['session_updates'],
+                array( 'id' => $session_id )
+            );
+            $updated += count( $diff_result['session_updates'] );
+        }
+
+        // ─── Audit log: one entry per changed field ───
+        if ( $this->audit && ! empty( $diff_result['diff'] ) ) {
+            foreach ( $diff_result['diff'] as $change ) {
+                $this->audit->log( array(
+                    'session_id'  => $session_id,
+                    'event_type'  => $session['event_type'] ?? 'satellite',
+                    'action'      => 'field_edit',
+                    'source'      => 'smartsheet',
+                    'entity_type' => $change['store'] === 'session' ? 'session' : 'meta',
+                    'entity_id'   => (string) $session_id,
+                    'field_name'  => $change['field'],
+                    'old_value'   => $change['old'],
+                    'new_value'   => $change['new'],
+                    'meta'        => array(
+                        'trigger'  => 'smartsheet_pull',
+                        'ss_title' => $change['ss_title'],
+                    ),
+                ));
+            }
+        }
+
+        return $updated;
+    }
+
+    /**
+     * Extract the short_name value from a Smartsheet row.
+     *
+     * Used when auto-creating sessions from unmatched rows.
+     *
+     * @param array $row     Smartsheet row data.
+     * @param array $columns Field mapping columns.
+     * @return string
+     */
+    private function extract_short_name_from_row( $row, $columns ) {
+        $sponsor_col_id = null;
+        foreach ( $columns as $mapping ) {
+            if ( $mapping['portal_key'] === 'short_name' && $mapping['portal_store'] === 'session' ) {
+                $sponsor_col_id = $mapping['ss_column_id'];
+                break;
+            }
+        }
+
+        if ( ! $sponsor_col_id ) return '';
+
+        foreach ( $row['cells'] as $cell ) {
+            if ( $cell['columnId'] == $sponsor_col_id ) {
+                return trim( $cell['displayValue'] ?? $cell['value'] ?? '' );
+            }
+        }
+
+        return '';
     }
 
     /* ───────────────────────────────────────────
@@ -446,19 +666,16 @@ class WSSP_Smartsheet {
 
         switch ( $type ) {
             case 'checkbox':
-                // Smartsheet checkboxes are true/false
                 $raw = $cell['value'] ?? false;
                 return $raw ? 'yes' : '';
 
             case 'picklist':
-                // Apply value_map if defined
                 if ( ! empty( $mapping['value_map'] ) && isset( $mapping['value_map'][ $value ] ) ) {
                     return $mapping['value_map'][ $value ];
                 }
                 return (string) $value;
 
             case 'date':
-                // Normalize any date format (MM/DD/YY, YYYY-MM-DD, etc.) to Y-m-d
                 $value = trim( (string) $value );
                 if ( empty( $value ) ) return '';
                 $ts = strtotime( $value );
@@ -480,7 +697,6 @@ class WSSP_Smartsheet {
                 return in_array( $value, array( 'yes', '1', 'true', true ), true );
 
             case 'picklist':
-                // Reverse value_map if defined
                 if ( ! empty( $mapping['value_map'] ) ) {
                     $reverse = array_flip( $mapping['value_map'] );
                     if ( isset( $reverse[ $value ] ) ) {
@@ -505,7 +721,6 @@ class WSSP_Smartsheet {
         $field_id = FrmField::get_id_by_key( $field_key );
         if ( ! $field_id ) return '';
 
-        // Find the session's Formidable entry via session_key
         $session_key_field_id = FrmField::get_id_by_key( 'wssp_session_key' );
         if ( ! $session_key_field_id ) return '';
 
@@ -575,16 +790,10 @@ class WSSP_Smartsheet {
      * SETTINGS
      * ─────────────────────────────────────────── */
 
-    /**
-     * Check if Smartsheet sync is configured.
-     */
     public function is_configured() {
         return ! empty( $this->api_token ) && ! empty( $this->field_map );
     }
 
-    /**
-     * Save the API token.
-     */
     public static function save_api_token( $token ) {
         update_option( 'wssp_smartsheet_api_token', sanitize_text_field( $token ) );
     }

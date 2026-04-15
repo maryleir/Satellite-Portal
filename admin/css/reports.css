@@ -83,35 +83,12 @@
     color: #555;
 }
 
-.wssp-report__action-badge--field_edit {
-    background: #e8f5e9;
-    color: #2e7d32;
-}
-
-.wssp-report__action-badge--form_submitted {
-    background: #e3f2fd;
-    color: #1565c0;
-}
-
-.wssp-report__action-badge--status_change {
-    background: #fff3e0;
-    color: #e65100;
-}
-
-.wssp-report__action-badge--file_upload {
-    background: #f3e5f5;
-    color: #6a1b9a;
-}
-
-.wssp-report__action-badge--file_status_change {
-    background: #fce4ec;
-    color: #c62828;
-}
-
-.wssp-report__action-badge--team_change {
-    background: #fff8e1;
-    color: #f57f17;
-}
+.wssp-report__action-badge--field_edit        { background: #e8f5e9; color: #2e7d32; }
+.wssp-report__action-badge--form_submitted    { background: #e3f2fd; color: #1565c0; }
+.wssp-report__action-badge--status_change     { background: #fff3e0; color: #e65100; }
+.wssp-report__action-badge--file_upload       { background: #f3e5f5; color: #6a1b9a; }
+.wssp-report__action-badge--file_status_change { background: #fce4ec; color: #c62828; }
+.wssp-report__action-badge--team_change       { background: #fff8e1; color: #f57f17; }
 
 /* ─── Pagination ─── */
 .wssp-report__pagination {
@@ -157,40 +134,13 @@
     flex-shrink: 0;
 }
 
-.wssp-report__dot--not_started {
-    background: #e5e7eb;
-    border: 1px solid #d1d5db;
-}
-
-.wssp-report__dot--acknowledged {
-    background: #c7d2fe;
-    border: 1px solid #a5b4fc;
-}
-
-.wssp-report__dot--in_progress {
-    background: #fcd34d;
-    border: 1px solid #f59e0b;
-}
-
-.wssp-report__dot--under_review {
-    background: #fcd34d;
-    border: 1px solid #f59e0b;
-}
-
-.wssp-report__dot--complete {
-    background: #6ee7b7;
-    border: 1px solid #34d399;
-}
-
-.wssp-report__dot--approved {
-    background: #6ee7b7;
-    border: 1px solid #34d399;
-}
-
-.wssp-report__dot--revision_requested {
-    background: #fca5a5;
-    border: 1px solid #f87171;
-}
+.wssp-report__dot--not_started        { background: #e5e7eb; border: 1px solid #d1d5db; }
+.wssp-report__dot--acknowledged       { background: #c7d2fe; border: 1px solid #a5b4fc; }
+.wssp-report__dot--in_progress        { background: #fcd34d; border: 1px solid #f59e0b; }
+.wssp-report__dot--under_review       { background: #fcd34d; border: 1px solid #f59e0b; }
+.wssp-report__dot--complete           { background: #6ee7b7; border: 1px solid #34d399; }
+.wssp-report__dot--approved           { background: #6ee7b7; border: 1px solid #34d399; }
+.wssp-report__dot--revision_requested { background: #fca5a5; border: 1px solid #f87171; }
 
 /* ─── Matrix container ─── */
 .wssp-report__matrix-wrap {
@@ -226,13 +176,42 @@
     z-index: 1;
 }
 
-/* Phase group header */
+/* Phase group header — now clickable */
 .wssp-report__matrix-phase-header {
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: #374151;
     border-bottom: 2px solid #2e75b6;
+    padding: 0;
+}
+
+.wssp-report__phase-link {
+    display: block;
+    padding: 8px 12px;
+    text-decoration: none;
+    color: #2e75b6;
+    transition: background 0.15s, color 0.15s;
+}
+
+.wssp-report__phase-link:hover {
+    background: #e8f0fe;
+    color: #1a56a0;
+}
+
+.wssp-report__phase-link:focus {
+    outline: 2px solid #2e75b6;
+    outline-offset: -2px;
+}
+
+.wssp-report__matrix-phase-header--active {
+    border-bottom-color: #1a56a0;
+    background: #e8f0fe;
+}
+
+.wssp-report__matrix-phase-header--active .wssp-report__phase-link {
+    color: #1a56a0;
+    font-weight: 700;
 }
 
 /* Task column headers — rotated for density */
@@ -309,7 +288,6 @@
 .wssp-report__matrix-cell--approved             { background: #ecfdf5; }
 .wssp-report__matrix-cell--revision_requested   { background: #fef2f2; }
 
-/* Center the dot in each cell */
 .wssp-report__matrix-cell .wssp-report__dot {
     margin: 0 auto;
     display: block;
@@ -339,4 +317,375 @@
     font-size: 12px;
     color: #666;
     vertical-align: middle;
+}
+
+/* ═══════════════════════════════════════════
+ * PHASE DETAIL DRILL-DOWN
+ * ═══════════════════════════════════════════ */
+
+.wssp-report__phase-detail {
+    border-left: 4px solid #2e75b6;
+}
+
+.wssp-report__phase-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.wssp-report__phase-detail-header h2 {
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0;
+}
+
+.wssp-report__phase-detail-scroll {
+    overflow-x: auto;
+}
+
+/* Detail table */
+.wssp-report__detail-table {
+    font-size: 13px;
+}
+
+.wssp-report__detail-session-col { width: 160px; }
+.wssp-report__detail-task-col    { width: 180px; }
+.wssp-report__detail-status-col  { width: 140px; }
+.wssp-report__detail-response-col { min-width: 200px; }
+.wssp-report__detail-when-col    { width: 100px; }
+.wssp-report__detail-who-col     { width: 120px; }
+
+.wssp-report__detail-session-cell {
+    vertical-align: top;
+    border-right: 2px solid #e5e7eb;
+    background: #f8f9fa;
+}
+
+.wssp-report__detail-session-cell a {
+    text-decoration: none;
+}
+
+.wssp-report__detail-status-label {
+    font-size: 11px;
+    color: #666;
+    margin-left: 4px;
+}
+
+.wssp-report__detail-response {
+    font-size: 12px;
+    max-width: 300px;
+    word-break: break-word;
+}
+
+.wssp-report__detail-empty {
+    color: #ccc;
+}
+
+.wssp-report__detail-when {
+    white-space: nowrap;
+    font-size: 12px;
+}
+
+/* Row separator between sessions */
+.wssp-report__detail-row td {
+    border-top: 1px solid #f0f0f0;
+}
+
+.wssp-report__detail-session-cell {
+    border-top: 2px solid #ddd !important;
+}
+
+/* Subtle row tinting for status */
+.wssp-report__detail-row--revision_requested {
+    background: #fff5f5;
+}
+
+.wssp-report__detail-row--approved,
+.wssp-report__detail-row--complete {
+    background: #f0fdf4;
+}
+
+
+/* ═══════════════════════════════════════════
+ * LOGISTICS DASHBOARD
+ * ═══════════════════════════════════════════ */
+
+/* ─── Quick Stats Row ─── */
+.wssp-ld__stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin: 20px 0;
+}
+
+.wssp-ld__stat-card {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    padding: 20px;
+    text-align: center;
+}
+
+.wssp-ld__stat-number {
+    font-size: 36px;
+    font-weight: 700;
+    color: #1d2327;
+    line-height: 1;
+    margin-bottom: 6px;
+}
+
+.wssp-ld__stat-label {
+    font-size: 13px;
+    color: #646970;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.wssp-ld__stat-card--attention .wssp-ld__stat-number {
+    color: #c62828;
+}
+
+.wssp-ld__stat-card--attention {
+    border-color: #ef9a9a;
+}
+
+.wssp-ld__stat-card--complete .wssp-ld__stat-number {
+    color: #2e7d32;
+}
+
+.wssp-ld__stat-card--complete {
+    border-color: #a5d6a7;
+}
+
+/* ─── Attention Section ─── */
+.wssp-ld__attention-icon {
+    color: #e65100;
+    margin-right: 4px;
+}
+
+.wssp-ld__count-badge {
+    display: inline-block;
+    background: #c62828;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+.wssp-ld__all-clear {
+    color: #2e7d32;
+    font-style: italic;
+    padding: 8px 0;
+}
+
+.wssp-ld__issue {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 16px;
+    margin-bottom: 4px;
+    font-size: 13px;
+}
+
+.wssp-ld__issue-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.wssp-ld__issue--overdue .wssp-ld__issue-badge {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.wssp-ld__issue--revision .wssp-ld__issue-badge {
+    background: #fff3e0;
+    color: #e65100;
+}
+
+/* ─── Phase Progress Grid ─── */
+.wssp-ld__phases-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+}
+
+.wssp-ld__phase-card {
+    display: block;
+    padding: 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.wssp-ld__phase-card:hover {
+    border-color: #2e75b6;
+    box-shadow: 0 2px 8px rgba(46, 117, 182, 0.12);
+}
+
+.wssp-ld__phase-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+}
+
+.wssp-ld__phase-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: #1d2327;
+}
+
+.wssp-ld__phase-pct {
+    font-size: 20px;
+    font-weight: 700;
+    color: #2e75b6;
+}
+
+.wssp-ld__phase-bar {
+    width: 100%;
+    height: 8px;
+    margin-bottom: 8px;
+}
+
+.wssp-ld__phase-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #646970;
+    margin-bottom: 10px;
+}
+
+.wssp-ld__phase-revision {
+    color: #e65100;
+    font-weight: 600;
+}
+
+.wssp-ld__phase-tasks {
+    border-top: 1px solid #f0f0f0;
+    padding-top: 8px;
+}
+
+.wssp-ld__phase-task-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+    font-size: 12px;
+    color: #555;
+}
+
+.wssp-ld__phase-task-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+}
+
+.wssp-ld__phase-task-count {
+    flex-shrink: 0;
+    color: #999;
+    font-variant-numeric: tabular-nums;
+}
+
+.wssp-ld__revision-dot {
+    color: #f87171;
+    font-size: 10px;
+    margin-left: 2px;
+}
+
+/* ─── Activity Timeline ─── */
+.wssp-ld__activity-controls {
+    float: right;
+    display: inline-flex;
+    gap: 4px;
+    font-weight: normal;
+}
+
+.wssp-ld__timeline {
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.wssp-ld__timeline-day {
+    margin-bottom: 20px;
+}
+
+.wssp-ld__timeline-date {
+    font-weight: 600;
+    font-size: 13px;
+    color: #1d2327;
+    padding-bottom: 6px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #eee;
+}
+
+.wssp-ld__timeline-count {
+    font-weight: 400;
+    color: #999;
+    margin-left: 8px;
+    font-size: 12px;
+}
+
+.wssp-ld__timeline-entry {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 0;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.wssp-ld__timeline-time {
+    flex-shrink: 0;
+    width: 60px;
+    color: #999;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.wssp-ld__timeline-session {
+    flex-shrink: 0;
+    width: 80px;
+}
+
+.wssp-ld__timeline-session a {
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.wssp-ld__timeline-user {
+    flex-shrink: 0;
+    width: 120px;
+    color: #555;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wssp-ld__timeline-action {
+    color: #333;
+    font-size: 12px;
+}
+
+.wssp-ld__timeline-action strong {
+    font-weight: 600;
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 960px) {
+    .wssp-ld__stats-row {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .wssp-ld__phases-grid {
+        grid-template-columns: 1fr;
+    }
 }

@@ -20,6 +20,10 @@ $event_type = $session['event_type'] ?? 'satellite';
 $meta       = $session_meta->get_all( $session_id );
 $addons_config = $config->get_addons( $event_type );
 
+echo '<!-- DEBUG addons: ' . esc_html( wp_json_encode( array_keys( $addons_config ) ) ) . ' -->';
+echo '<!-- DEBUG meta keys: ' . esc_html( wp_json_encode( array_keys( $meta ) ) ) . ' -->';
+
+
 // Helper to get meta with fallback
 $m = function( $key, $default = '' ) use ( $meta ) {
     return $meta[ $key ] ?? $default;

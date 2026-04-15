@@ -213,7 +213,7 @@ return array(
         array(
             'ss_column_id' => 691903652384644,
             'ss_title'     => '2nd FTS - Purchased',
-            'portal_key'   => 'addon_second_fts',
+            'portal_key'   => 'addon_additional_fts',
             'portal_store' => 'meta',
             'direction'    => 'pull',
             'type'         => 'picklist',
@@ -231,7 +231,7 @@ return array(
         array(
             'ss_column_id' => 2943703466069892,
             'ss_title'     => 'Door Drop - Purchased',
-            'portal_key'   => 'addon_door_drop',
+            'portal_key'   => 'addon_hotel_door_drop',
             'portal_store' => 'meta',
             'direction'    => 'pull',
             'type'         => 'picklist',
@@ -240,7 +240,7 @@ return array(
         array(
             'ss_column_id' => 7447303093440388,
             'ss_title'     => 'Program Advertisement - Purchased',
-            'portal_key'   => 'addon_program_ad',
+            'portal_key'   => 'addon_program_advertisement',
             'portal_store' => 'meta',
             'direction'    => 'pull',
             'type'         => 'picklist',

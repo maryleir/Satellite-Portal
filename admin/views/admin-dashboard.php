@@ -7,13 +7,38 @@
     
     <?php if ( isset( $_GET['ss_pulled_all'] ) ) : ?>
     <div class="notice notice-success is-dismissible">
-        <p><?php echo esc_html( urldecode( $_GET['ss_msg'] ?? '' ) ); ?>
-           (<?php echo absint( $_GET['ss_count'] ?? 0 ); ?> sessions updated)</p>
+        <p><?php echo esc_html( urldecode( $_GET['ss_msg'] ?? 'Sync complete.' ) ); ?>
+           <?php if ( ! empty( $_GET['ss_count'] ) ) : ?>
+               (<?php echo absint( $_GET['ss_count'] ); ?> sessions updated)
+           <?php endif; ?>
+        </p>
     </div>
     <?php endif; ?>
+
+    <?php if ( isset( $_GET['ss_error'] ) ) : ?>
+    <div class="notice notice-error is-dismissible">
+        <p>Smartsheet sync error: <?php echo esc_html( urldecode( $_GET['ss_msg'] ?? 'Unknown error.' ) ); ?></p>
+    </div>
+    <?php endif; ?>
+
     <?php if ( isset( $_GET['ss_token_saved'] ) ) : ?>
         <div class="notice notice-success is-dismissible"><p>API token saved.</p></div>
     <?php endif; ?>
+
+    <!-- ═══════════════════════════════════════════
+         Smartsheet Pull Preview (shown after dry-run)
+         ═══════════════════════════════════════════ -->
+    <?php if ( ! empty( $_GET['ss_preview_all'] ) ) :
+        $ss_preview = get_transient( 'wssp_ss_preview_all' );
+        if ( $ss_preview ) :
+            $preview_type = 'all';
+            include WSSP_PLUGIN_DIR . 'admin/views/smartsheet-preview.php';
+        else : ?>
+            <div class="notice notice-warning is-dismissible">
+                <p>Preview expired — please try the sync again.</p>
+            </div>
+        <?php endif;
+    endif; ?>
  
     <div class="wssp-card" style="margin-bottom: 20px;">
         <h2>Smartsheet</h2>
@@ -22,8 +47,7 @@
             <form method="post" action="<?php echo admin_url( 'admin-post.php' ); ?>" style="display:inline;">
                 <?php wp_nonce_field( 'wssp_smartsheet_pull_all' ); ?>
                 <input type="hidden" name="action" value="wssp_smartsheet_pull_all">
-                <button type="submit" class="button button-primary"
-                        onclick="return confirm('Pull data from Smartsheet for all sessions?');">
+                <button type="submit" class="button button-primary">
                     ↓ Sync All from Smartsheet
                 </button>
             </form>
