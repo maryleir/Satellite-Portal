@@ -167,58 +167,52 @@ $m = function( $key, $default = '' ) use ( $meta ) {
                 </td>
             </tr>
 
-            <!-- ─── Tracking ─── -->
-            <tr>
-                <th scope="row">Lead Retrieval #</th>
-                <td>
-                    <input type="text" name="meta[lead_retrieval_number]" class="regular-text"
-                           value="<?php echo esc_attr( $m( 'lead_retrieval_number' ) ); ?>">
-                </td>
-            </tr>
-            <tr>
-                <th scope="row">Lead Retrieval Report Sent</th>
-                <td>
-                    <label>
-                        <input type="checkbox" name="meta[lead_report_sent]" value="yes"
-                            <?php checked( $m( 'lead_report_sent' ), 'yes' ); ?>>
-                        Report has been sent to sponsor
-                    </label>
-                </td>
-            </tr>
-            <tr>
-                <th scope="row">On Demand Count</th>
-                <td>
-                    <input type="number" name="meta[on_demand_count]" class="small-text"
-                           value="<?php echo esc_attr( $m( 'on_demand_count' ) ); ?>"
-                           min="0">
-                </td>
-            </tr>
         </table>
 
-        <!-- ═══ Purchased Add-Ons ═══ -->
-        <h3>Purchased Add-Ons</h3>
-        <p class="description">Mark which add-ons were purchased with the application. Sponsors can also request add-ons through the portal.</p>
+        <!-- ═══ Add-On Status ═══ -->
+        <h3>Add-On Status</h3>
+        <p class="description">
+            Logistics-entered state for each add-on. Values sync to Smartsheet.
+            Sponsors can also request add-ons through the portal — those
+            requests flip these states automatically. Audit log preserves
+            the history of each change.
+        </p>
 
         <table class="form-table">
             <?php foreach ( $addons_config as $addon_slug => $addon ) :
-                $meta_key  = 'addon_' . $addon_slug;
-                $is_purchased = $m( $meta_key ) === 'yes';
-                $requested_key = 'addon_requested_' . $addon_slug;
-                $is_requested = $m( $requested_key ) === 'yes';
+                $meta_key = 'addon_' . $addon_slug;
+                $current  = (string) $m( $meta_key );
+                // Normalize any legacy/raw values for the UI. This is
+                // cosmetic — the DB is the source of truth. Everything
+                // that isn't exactly 'yes' or 'declined' renders as Not set.
+                $current_state = ( $current === 'yes' || $current === 'declined' ) ? $current : '';
             ?>
                 <tr>
                     <th scope="row"><?php echo esc_html( $addon['label'] ); ?></th>
                     <td>
-                        <label style="margin-right: 20px;">
-                            <input type="checkbox" name="meta[<?php echo esc_attr( $meta_key ); ?>]" value="yes"
-                                <?php checked( $is_purchased ); ?>>
-                            Purchased
-                        </label>
-                        <?php if ( $is_requested && ! $is_purchased ) : ?>
-                            <span class="wssp-admin-badge wssp-admin-badge--requested">
-                                Sponsor requested this add-on
-                            </span>
-                        <?php endif; ?>
+                        <fieldset class="wssp-addon-radio-group" style="display: flex; gap: 16px; align-items: center;">
+                            <label>
+                                <input type="radio"
+                                       name="meta[<?php echo esc_attr( $meta_key ); ?>]"
+                                       value="yes"
+                                       <?php checked( $current_state, 'yes' ); ?>>
+                                Purchased
+                            </label>
+                            <label>
+                                <input type="radio"
+                                       name="meta[<?php echo esc_attr( $meta_key ); ?>]"
+                                       value="declined"
+                                       <?php checked( $current_state, 'declined' ); ?>>
+                                Declined
+                            </label>
+                            <label>
+                                <input type="radio"
+                                       name="meta[<?php echo esc_attr( $meta_key ); ?>]"
+                                       value=""
+                                       <?php checked( $current_state, '' ); ?>>
+                                Not set
+                            </label>
+                        </fieldset>
                         <?php if ( ! empty( $addon['cutoff'] ) ) : ?>
                             <p class="description">Cutoff: <?php echo esc_html( date( 'M j, Y', strtotime( $addon['cutoff'] ) ) ); ?></p>
                         <?php endif; ?>

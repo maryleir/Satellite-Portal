@@ -282,7 +282,9 @@ class WSSP_Condition_Evaluator {
      * Determine if a given add-on is active (purchased/confirmed).
      *
      * Checks for session_meta key 'addon_{slug}' in the merged session data.
-     * Values like 'yes', '1', 'true', 'hold' indicate an active add-on.
+     * Values 'yes', '1', 'true' indicate an active add-on. The meta value
+     * 'declined' is a distinct state handled by compute_addon_states() and
+     * explicitly NOT active here.
      *
      * @param array  $session_data Merged session data (must include session_meta).
      * @param string $addon_slug   Add-on slug, e.g. 'push_notification'.
@@ -292,7 +294,7 @@ class WSSP_Condition_Evaluator {
         $meta_key = 'addon_' . $addon_slug;
         $value    = strtolower( trim( (string) ( $session_data[ $meta_key ] ?? '' ) ) );
 
-        return in_array( $value, array( 'yes', '1', 'true', 'hold' ), true );
+        return in_array( $value, array( 'yes', '1', 'true' ), true );
     }
 
     /**

@@ -1,22 +1,35 @@
 <?php
 /**
- * Smartsheet Pull Preview — Partial template
+ * Smartsheet Sync Preview — Partial template
  *
  * Renders a diff table showing what will change, with a Confirm / Cancel action.
+ * Supports both PULL (Smartsheet→Portal) and PUSH (Portal→Smartsheet) previews.
+ *
  * Include this partial in:
- *   1. session-manager.php  — when $_GET['ss_preview'] is set (single session)
- *   2. admin-dashboard.php  — when $_GET['ss_preview_all'] is set (all sessions)
+ *   1. session-manager.php  — when $_GET['ss_preview'] is set (single pull)
+ *   2. admin-dashboard.php  — when $_GET['ss_preview_all'] is set (all sessions pull)
+ *   3. session-manager.php  — when $_GET['ss_push_preview'] is set (single push)
  *
  * ═══════════════════════════════════════════════════════════════════
  *
- * USAGE IN session-manager.php:
- *
- *   Add this block near the top of the page, after the success/error notices:
+ * USAGE IN session-manager.php (PULL preview):
  *
  *   <?php if ( ! empty( $_GET['ss_preview'] ) ) :
  *       $ss_preview = get_transient( 'wssp_ss_preview_' . $session_id );
  *       if ( $ss_preview && ! empty( $ss_preview['diff'] ) ) :
  *           $preview_type = 'single';
+ *           include WSSP_PLUGIN_DIR . 'admin/views/smartsheet-preview.php';
+ *       endif;
+ *   endif; ?>
+ *
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ * USAGE IN session-manager.php (PUSH preview):
+ *
+ *   <?php if ( ! empty( $_GET['ss_push_preview'] ) ) :
+ *       $ss_preview = get_transient( 'wssp_ss_push_preview_' . $session_id );
+ *       if ( $ss_preview && ! empty( $ss_preview['diff'] ) ) :
+ *           $preview_type = 'push';
  *           include WSSP_PLUGIN_DIR . 'admin/views/smartsheet-preview.php';
  *       endif;
  *   endif; ?>
@@ -36,9 +49,9 @@
  * ═══════════════════════════════════════════════════════════════════
  *
  * Variables expected:
- *   $ss_preview   — result array from pull_session(dry_run=true) or pull_all_sessions(dry_run=true)
- *   $preview_type — 'single' or 'all'
- *   $session_id   — (single only) the session being previewed
+ *   $ss_preview   — result array from pull/push dry_run
+ *   $preview_type — 'single', 'all', or 'push'
+ *   $session_id   — (single/push only) the session being previewed
  *
  * @package WSSP
  */
@@ -48,11 +61,16 @@ defined( 'ABSPATH' ) || exit;
 
 <div class="wssp-card wssp-ss-preview" style="border-left: 4px solid #e65100; background: #fff8e1;">
     <h2 style="color: #e65100; margin-top: 0;">
-        ⚠ Smartsheet Pull Preview
+        <?php if ( $preview_type === 'push' ) : ?>
+            ⚠ Smartsheet Push Preview
+        <?php else : ?>
+            ⚠ Smartsheet Pull Preview
+        <?php endif; ?>
     </h2>
     <p>The following changes will be applied when you confirm. Review carefully.</p>
 
-    <?php if ( $preview_type === 'single' && ! empty( $ss_preview['diff'] ) ) : ?>
+    <?php if ( $preview_type === 'single' && ( ! empty( $ss_preview['diff'] ) || ! empty( $ss_preview['skipped_fields'] ) ) ) : ?>
+
         <!-- ─── Single session diff ─── -->
         <table class="wp-list-table widefat fixed striped" style="margin: 16px 0;">
             <thead>
@@ -258,6 +276,110 @@ defined( 'ABSPATH' ) || exit;
                 </button>
             </form>
             <a href="<?php echo esc_url( admin_url( 'admin.php?page=wssp-dashboard' ) ); ?>"
+               class="button">
+                ✕ Cancel
+            </a>
+        </div>
+
+    <?php elseif ( $preview_type === 'push' && ! empty( $ss_preview['diff'] ) ) : ?>
+        <!-- ─── Push preview diff ─── -->
+        <?php
+        // Mode determines what the preview is showing:
+        //   diff_with_ss  — manual admin push, compared against live SS row. Show real ss_before.
+        //   changed_keys  — auto-push scoped to sponsor-changed fields, no SS fetch. ss_before is unknown.
+        $push_mode = $ss_preview['mode'] ?? 'diff_with_ss';
+        ?>
+        <table class="wp-list-table widefat fixed striped" style="margin: 16px 0;">
+            <thead>
+                <tr>
+                    <th style="width: 200px;">Smartsheet Column</th>
+                    <th style="width: 180px;">Portal Field</th>
+                    <th>Source</th>
+                    <th>Current Portal Value</th>
+                    <?php if ( $push_mode === 'diff_with_ss' ) : ?>
+                        <th>Current Smartsheet Value</th>
+                    <?php endif; ?>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ( $ss_preview['diff'] as $change ) : ?>
+                    <tr>
+                        <td><strong><?php echo esc_html( $change['ss_title'] ); ?></strong></td>
+                        <td><code><?php echo esc_html( $change['field'] ); ?></code></td>
+                        <td>
+                            <?php
+                            $store_labels = array( 'meta' => 'Session Meta', 'session' => 'Session Table', 'formidable' => 'Formidable Form' );
+                            echo esc_html( $store_labels[ $change['store'] ] ?? $change['store'] );
+                            ?>
+                        </td>
+                        <td style="background: #f0fdf4; color: #166534;">
+                            <?php
+                            $portal_display = $change['value'];
+                            if ( is_array( $portal_display ) ) {
+                                $portal_display = wp_json_encode( $portal_display );
+                            }
+                            echo esc_html( $portal_display !== '' ? $portal_display : '(empty)' );
+                            ?>
+                        </td>
+                        <?php if ( $push_mode === 'diff_with_ss' ) : ?>
+                            <td style="background: #fef2f2; color: #991b1b;">
+                                <?php
+                                $ss_display = $change['ss_before'] ?? '';
+                                if ( is_array( $ss_display ) ) {
+                                    $ss_display = wp_json_encode( $ss_display );
+                                }
+                                echo esc_html( $ss_display !== '' ? (string) $ss_display : '(empty)' );
+                                ?>
+                            </td>
+                        <?php endif; ?>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+
+        <?php // Show A2 skipped fields (portal empty, SS has value — protected from overwrite) ?>
+        <?php if ( ! empty( $ss_preview['skipped_fields'] ) ) : ?>
+            <h3 style="margin-top: 24px;">Skipped (empty-value protection)</h3>
+            <p style="color: #666; font-size: 13px; margin-top: 4px;">
+                These fields are empty in the portal but have values in Smartsheet.
+                They will NOT be touched — this protects logistics entries from being wiped by stale portal data.
+            </p>
+            <table class="wp-list-table widefat fixed striped" style="margin: 8px 0;">
+                <thead>
+                    <tr>
+                        <th style="width: 200px;">Smartsheet Column</th>
+                        <th style="width: 180px;">Portal Field</th>
+                        <th>Current Smartsheet Value (protected)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ( $ss_preview['skipped_fields'] as $sf ) : ?>
+                        <tr>
+                            <td><strong><?php echo esc_html( $sf['ss_title'] ); ?></strong></td>
+                            <td><code><?php echo esc_html( $sf['field'] ); ?></code></td>
+                            <td style="background: #fef2f2; color: #991b1b;">
+                                <?php
+                                $v = $sf['ss_value'] ?? '';
+                                if ( is_array( $v ) ) { $v = wp_json_encode( $v ); }
+                                echo esc_html( (string) $v );
+                                ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+
+        <div style="display: flex; gap: 12px; margin-top: 16px;">
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <?php wp_nonce_field( 'wssp_smartsheet_push_confirm' ); ?>
+                <input type="hidden" name="action" value="wssp_smartsheet_push_confirm">
+                <input type="hidden" name="session_id" value="<?php echo esc_attr( $session_id ); ?>">
+                <button type="submit" class="button button-primary">
+                    ✓ Confirm — Push <?php echo count( $ss_preview['diff'] ); ?> Field(s) to Smartsheet
+                </button>
+            </form>
+            <a href="<?php echo esc_url( admin_url( 'admin.php?page=wssp-manage-session&session_id=' . $session_id ) ); ?>"
                class="button">
                 ✕ Cancel
             </a>

@@ -62,6 +62,13 @@ class WSSP_Formidable {
     private $dashboard;
 
     /**
+     * Smartsheet sync instance for auto-push after form submissions.
+     *
+     * @var WSSP_Smartsheet|null
+     */
+    private $smartsheet;
+
+    /**
      * Pre-update entry snapshot for diffing.
      *
      * Captured by the frm_pre_update_entry hook so the
@@ -70,6 +77,22 @@ class WSSP_Formidable {
      * @var array  Keyed by entry_id => [ field_key => value ].
      */
     private $pre_update_snapshots = array();
+
+    /**
+     * Per-entry stash of "what changed in this save" so that the
+     * maybe_push_to_smartsheet callback at priority 50 can scope its
+     * push to only the fields that were actually modified.
+     *
+     * Populated by audit_log_form_create (priority 35) and
+     * audit_log_form_update (priority 35). Consumed and cleared by
+     * maybe_push_to_smartsheet (priority 50).
+     *
+     * @var array  Keyed by entry_id => [
+     *     'changed_field_keys' => [...],
+     *     'changed_meta_keys'  => [...],
+     * ]
+     */
+    private $save_change_stash = array();
 
     /**
      * Field keys that are internal plumbing and should never appear
@@ -82,14 +105,16 @@ class WSSP_Formidable {
     /**
      * Constructor
      *
-     * @param WSSP_Audit_Log|null  $audit     Optional audit logger.
-     * @param WSSP_Config|null     $config    Portal config (needed for field→task mapping).
-     * @param WSSP_Dashboard|null  $dashboard Dashboard (needed for task status writes).
+     * @param WSSP_Audit_Log|null   $audit      Optional audit logger.
+     * @param WSSP_Config|null      $config     Portal config (needed for field→task mapping).
+     * @param WSSP_Dashboard|null   $dashboard  Dashboard (needed for task status writes).
+     * @param WSSP_Smartsheet|null  $smartsheet Smartsheet sync (for auto-push after form save).
      */
-    public function __construct( WSSP_Audit_Log $audit = null, WSSP_Config $config = null, WSSP_Dashboard $dashboard = null ) {
-        $this->audit     = $audit;
-        $this->config    = $config;
-        $this->dashboard = $dashboard;
+    public function __construct( ?WSSP_Audit_Log $audit = null, ?WSSP_Config $config = null, ?WSSP_Dashboard $dashboard = null, ?WSSP_Smartsheet $smartsheet = null ) {
+        $this->audit      = $audit;
+        $this->config     = $config;
+        $this->dashboard  = $dashboard;
+        $this->smartsheet = $smartsheet;
         $this->init_hooks();
     }
 
@@ -119,6 +144,13 @@ class WSSP_Formidable {
         // the session linkage is established and we can resolve session_id.
         add_action( 'frm_after_create_entry', array( $this, 'audit_log_form_create' ), 35, 2 );
         add_action( 'frm_after_update_entry', array( $this, 'audit_log_form_update' ), 35, 2 );
+
+        // ─── Auto-push to Smartsheet after form save ───
+        // Priority 50 = after audit logging (35) and task status updates.
+        // Only fires for the core Session Data form, and only if the
+        // Smartsheet service was injected and is configured.
+        add_action( 'frm_after_create_entry', array( $this, 'maybe_push_to_smartsheet' ), 50, 2 );
+        add_action( 'frm_after_update_entry', array( $this, 'maybe_push_to_smartsheet' ), 50, 2 );
     }
 
     /**
@@ -314,15 +346,30 @@ class WSSP_Formidable {
             ),
         ) );
 
-        // ─── Mark affected tasks as in_progress ───
-        if ( ! empty( $filled_fields ) && $this->config && $this->dashboard ) {
-            $this->mark_tasks_in_progress(
-                (int) $session['id'],
-                $session['event_type'] ?? 'satellite',
-                $filled_fields,
-                $new_data
-            );
+        // ─── Compute affected tasks, mark in_progress, apply meta triggers ───
+        $session_id_int    = (int) $session['id'];
+        $event_type        = $session['event_type'] ?? 'satellite';
+        $affected_tasks    = array();
+        $changed_meta_keys = array();
+        if ( ! empty( $filled_fields ) && $this->config ) {
+            $affected_tasks = $this->compute_affected_tasks( $event_type, $filled_fields, $new_data );
+            if ( $this->dashboard ) {
+                $this->mark_tasks_in_progress( $session_id_int, $affected_tasks );
+            }
+            $changed_meta_keys = $this->apply_task_behavior_meta_triggers( $session_id_int, $event_type, $affected_tasks );
+
+            // Add-on request latches.
+            $addon_changes = $this->apply_addon_request_triggers( $session_id_int, $event_type, $filled_fields, $new_data );
+            if ( ! empty( $addon_changes ) ) {
+                $changed_meta_keys = array_values( array_unique( array_merge( $changed_meta_keys, $addon_changes ) ) );
+            }
         }
+
+        // Stash for maybe_push_to_smartsheet (priority 50).
+        $this->save_change_stash[ $entry_id ] = array(
+            'changed_field_keys' => $filled_fields,
+            'changed_meta_keys'  => $changed_meta_keys,
+        );
     }
 
     /**
@@ -401,13 +448,30 @@ class WSSP_Formidable {
         // If nothing actually changed (e.g. sponsor re-saved without edits),
         // don't log anything — keep the audit log free of noise.
 
-        // ─── Mark affected tasks as in_progress ───
-        // For each changed field, find which task(s) it belongs to and
-        // transition them from not_started → in_progress.  Tasks already
-        // in a later state (complete, approved, etc.) are left alone.
-        if ( ! empty( $changes ) && $this->config && $this->dashboard ) {
-            $this->mark_tasks_in_progress( $session_id, $event_type, $changes, $new_data );
+        // ─── Compute affected tasks, mark in_progress, apply meta triggers ───
+        $affected_tasks    = array();
+        $changed_meta_keys = array();
+        if ( ! empty( $changes ) && $this->config ) {
+            $affected_tasks = $this->compute_affected_tasks( $event_type, $changes, $new_data );
+            if ( $this->dashboard ) {
+                $this->mark_tasks_in_progress( $session_id, $affected_tasks );
+            }
+            $changed_meta_keys = $this->apply_task_behavior_meta_triggers( $session_id, $event_type, $affected_tasks );
+
+            // Add-on request latches (independent of affected_tasks because
+            // the add-on request fields often live on tasks not tagged with
+            // task_behavior overrides — we key directly off the field_keys).
+            $addon_changes = $this->apply_addon_request_triggers( $session_id, $event_type, $changes, $new_data );
+            if ( ! empty( $addon_changes ) ) {
+                $changed_meta_keys = array_values( array_unique( array_merge( $changed_meta_keys, $addon_changes ) ) );
+            }
         }
+
+        // Stash the changed-fields info for maybe_push_to_smartsheet (priority 50).
+        $this->save_change_stash[ $entry_id ] = array(
+            'changed_field_keys' => $changes,
+            'changed_meta_keys'  => $changed_meta_keys,
+        );
     }
 
     /**
@@ -452,17 +516,33 @@ class WSSP_Formidable {
      * @param array  $changed_field_keys  Field keys that were changed.
      * @param array  $session_data        Current Formidable entry data (for condition evaluation).
      */
-    private function mark_tasks_in_progress( $session_id, $event_type, $changed_field_keys, $session_data = array() ) {
-        $all_tasks = $this->config->get_all_tasks( $event_type );
+    /**
+     * Compute the set of task keys affected by a list of changed field keys.
+     *
+     * A task is "affected" when at least one of its field_keys appears in
+     * the changed set, provided the task is visible (condition met) and is
+     * a form-family task (form / review_approval — upload/info tasks have
+     * their own flow).
+     *
+     * @param string $event_type         Event type slug.
+     * @param array  $changed_field_keys Field keys that changed in this save.
+     * @param array  $session_data       Merged session data (for condition eval).
+     * @return array List of task slugs.
+     */
+    private function compute_affected_tasks( $event_type, $changed_field_keys, $session_data = array() ) {
+        if ( ! $this->config || empty( $changed_field_keys ) ) {
+            return array();
+        }
 
-        // Build a set of task keys affected by the changed fields.
+        $all_tasks      = $this->config->get_all_tasks( $event_type );
         $affected_tasks = array();
+
         foreach ( $all_tasks as $task ) {
             $task_field_keys = $task['field_keys'] ?? array();
             if ( empty( $task_field_keys ) ) {
                 continue;
             }
-            // Skip non-form tasks (uploads, info, etc.)
+            // Only form-family tasks.
             $type = $task['type'] ?? 'form';
             if ( ! in_array( $type, array( 'form', 'review_approval' ), true ) ) {
                 continue;
@@ -472,22 +552,320 @@ class WSSP_Formidable {
             if ( $condition && ! WSSP_Condition_Evaluator::is_visible( $condition, $session_data ) ) {
                 continue;
             }
-            // Check if any of this task's field_keys were changed.
             if ( array_intersect( $changed_field_keys, $task_field_keys ) ) {
                 $affected_tasks[] = $task['key'];
             }
         }
 
-        if ( empty( $affected_tasks ) ) {
+        return $affected_tasks;
+    }
+
+    /**
+     * Transition not_started/acknowledged tasks → in_progress for the given
+     * affected tasks. Tasks already in a later state are left alone.
+     *
+     * @param int    $session_id
+     * @param array  $affected_tasks List of task slugs.
+     */
+    private function mark_tasks_in_progress( $session_id, $affected_tasks ) {
+        if ( ! $this->dashboard || empty( $affected_tasks ) ) {
             return;
         }
 
-        // For each affected task, transition not_started/acknowledged → in_progress.
         foreach ( $affected_tasks as $task_key ) {
             $current = $this->dashboard->get_task_status( $session_id, $task_key );
             if ( in_array( $current, array( 'not_started', 'acknowledged' ), true ) ) {
                 $this->dashboard->set_task_status( $session_id, $task_key, 'in_progress' );
             }
+        }
+    }
+
+    /**
+     * Apply task-behavior meta triggers for this form save.
+     *
+     * Reads the task_behavior config for each affected task. Currently
+     * supports:
+     *
+     *   latch_meta_on_form_engagement => array(
+     *       'meta_key' => 'av_request_submitted',
+     *       'value'    => 'yes',
+     *   )
+     *
+     * When a task with this config is in $affected_tasks, and the meta
+     * key is not already set to the configured value, write it and
+     * return the meta_key in the list of changes so the subsequent
+     * Smartsheet push can include it.
+     *
+     * @param int   $session_id
+     * @param string $event_type
+     * @param array $affected_tasks List of task slugs affected by this save.
+     * @return array List of meta keys that were written during this call.
+     */
+    private function apply_task_behavior_meta_triggers( $session_id, $event_type, $affected_tasks ) {
+        if ( ! $this->config || empty( $affected_tasks ) ) {
+            return array();
+        }
+
+        $event_config  = $this->config->get_event_type( $event_type );
+        $task_behavior = $event_config['task_behavior'] ?? array();
+        if ( empty( $task_behavior ) ) {
+            return array();
+        }
+
+        $session_meta = new WSSP_Session_Meta();
+        $changed_meta = array();
+
+        foreach ( $affected_tasks as $task_key ) {
+            $behavior = $task_behavior[ $task_key ] ?? null;
+            if ( ! is_array( $behavior ) ) continue;
+
+            // ─── Latch: one-shot meta flip on form engagement ───
+            $latch = $behavior['latch_meta_on_form_engagement'] ?? null;
+            if ( is_array( $latch ) && ! empty( $latch['meta_key'] ) ) {
+                $meta_key      = $latch['meta_key'];
+                $desired_value = $latch['value'] ?? 'yes';
+
+                $current = (string) $session_meta->get( $session_id, $meta_key, '' );
+                if ( $current !== (string) $desired_value ) {
+                    $session_meta->update( $session_id, $meta_key, $desired_value );
+                    $changed_meta[] = $meta_key;
+
+                    // Audit: record the latch write so the trail is complete.
+                    if ( $this->audit ) {
+                        $this->audit->log( array(
+                            'session_id'  => $session_id,
+                            'event_type'  => $event_type,
+                            'action'      => 'field_edit',
+                            'source'      => 'portal',
+                            'entity_type' => 'meta',
+                            'entity_id'   => (string) $session_id,
+                            'field_name'  => $meta_key,
+                            'old_value'   => $current,
+                            'new_value'   => (string) $desired_value,
+                            'meta'        => array(
+                                'trigger'  => 'task_behavior_latch',
+                                'task_key' => $task_key,
+                            ),
+                        ) );
+                    }
+                }
+            }
+
+            // Future: mirror_form_field_to_meta would go here if we ever
+            // need the mirror pattern for a second field. Deliberately
+            // omitted now — YAGNI until a real use case appears.
+        }
+
+        return $changed_meta;
+    }
+
+    /**
+     * Apply add-on request latch triggers for this form save.
+     *
+     * Iterates every add-on defined under the manage-add-ons phase. For
+     * each add-on, checks whether its first field_key appears in the
+     * changed set; if so, normalizes the new Formidable value to an
+     * intent (affirmative / decline / unknown) and flips the meta
+     * accordingly.
+     *
+     * Intent mapping:
+     *   affirmative → meta 'addon_{slug}' = 'yes'     → pushes 'Yes - Requested' to SS
+     *   decline     → meta 'addon_{slug}' = 'declined' → pushes 'No - Declined' to SS
+     *   empty       → no change (sponsor hasn't answered yet)
+     *
+     * Idempotent: if the current meta already equals the target value,
+     * no write and no audit entry. This keeps the SS sheet quiet when
+     * the sponsor re-saves the form without changing add-on answers.
+     *
+     * Sponsor-request overrides a prior logistics decline: if meta is
+     * 'declined' (from SS pull) and sponsor subsequently requests, the
+     * latch flips to 'yes' and pushes 'Yes - Requested'. Logistics sees
+     * the change in SS and can re-evaluate.
+     *
+     * @param int    $session_id
+     * @param string $event_type
+     * @param array  $changed_field_keys Formidable field keys that changed in this save.
+     * @param array  $entry_data         The just-saved Formidable entry data.
+     * @return array List of meta keys written during this call.
+     */
+    private function apply_addon_request_triggers( $session_id, $event_type, $changed_field_keys, $entry_data ) {
+        if ( ! $this->config || empty( $changed_field_keys ) ) {
+            return array();
+        }
+
+        $addons = $this->config->get_addons( $event_type );
+        if ( empty( $addons ) ) {
+            return array();
+        }
+
+        $changed_set = array_fill_keys( $changed_field_keys, true );
+
+        $session_meta = new WSSP_Session_Meta();
+        $changed_meta = array();
+
+        foreach ( $addons as $addon_slug => $addon ) {
+            $field_key = ! empty( $addon['field_keys'] ) ? $addon['field_keys'][0] : '';
+            if ( ! $field_key ) continue;
+
+            // Only consider add-ons whose request field changed in this save.
+            if ( empty( $changed_set[ $field_key ] ) ) continue;
+
+            $raw = $entry_data[ $field_key ] ?? '';
+            if ( is_array( $raw ) ) {
+                $raw = implode( ' ', $raw );
+            }
+            $normalized = strtolower( trim( (string) $raw ) );
+
+            $target = null;
+            if ( $normalized === '' ) {
+                // Sponsor cleared the field — don't touch meta. Could mean
+                // "undecided" rather than "no", and we don't want to flip
+                // SS back silently.
+                continue;
+            } elseif ( in_array( $normalized, array( 'no', 'decline', 'declined', 'not interested' ), true ) ) {
+                $target = 'declined';
+            } else {
+                // Anything else non-empty counts as affirmative. Mirrors
+                // WSSP_Condition_Evaluator::is_addon_requested() semantics.
+                $target = 'yes';
+            }
+
+            $meta_key = 'addon_' . $addon_slug;
+            $current  = (string) $session_meta->get( $session_id, $meta_key, '' );
+
+            if ( $current === $target ) {
+                // Already in the target state — nothing to do.
+                continue;
+            }
+
+            $session_meta->update( $session_id, $meta_key, $target );
+            $changed_meta[] = $meta_key;
+
+            if ( $this->audit ) {
+                $this->audit->log( array(
+                    'session_id'  => $session_id,
+                    'event_type'  => $event_type,
+                    'action'      => 'field_edit',
+                    'source'      => 'portal',
+                    'entity_type' => 'meta',
+                    'entity_id'   => (string) $session_id,
+                    'field_name'  => $meta_key,
+                    'old_value'   => $current,
+                    'new_value'   => $target,
+                    'meta'        => array(
+                        'trigger'    => 'addon_request_latch',
+                        'addon_slug' => $addon_slug,
+                        'field_key'  => $field_key,
+                    ),
+                ) );
+            }
+        }
+
+        return $changed_meta;
+    }
+
+    /* ───────────────────────────────────────────
+     * AUTO-PUSH TO SMARTSHEET
+     * ─────────────────────────────────────────── */
+
+    /**
+     * Automatically push portal data to Smartsheet after a Session Data
+     * form entry is created or updated.
+     *
+     * Uses the 'changed_keys' push mode: only pushes fields whose
+     * portal_key was in the changed set for this specific save, either
+     * as a Formidable field the sponsor edited or a meta key written by
+     * a task-behavior trigger during this save. Untouched cells in SS
+     * (including values entered by logistics) are never overwritten.
+     *
+     * The changed-fields list is read from $this->save_change_stash,
+     * which is populated at priority 35 by audit_log_form_create and
+     * audit_log_form_update. This hook fires at priority 50.
+     *
+     * Only pushes if:
+     *   - The Smartsheet service is injected and configured
+     *   - The entry belongs to the core Session Data form
+     *   - The session has a Smartsheet row ID (linked via prior pull)
+     *   - There's at least one changed field/meta key to push
+     *
+     * Failures are logged but do NOT interrupt the form save — the
+     * sponsor's data is already safely stored in Formidable/portal.
+     *
+     * @param int $entry_id Formidable entry ID.
+     * @param int $form_id  Formidable form ID.
+     */
+    public function maybe_push_to_smartsheet( $entry_id, $form_id ) {
+        // Consume the stash regardless of early-return paths, so we don't
+        // leak memory across unrelated saves in the same request.
+        $stash = $this->save_change_stash[ $entry_id ] ?? null;
+        unset( $this->save_change_stash[ $entry_id ] );
+
+        // Skip if Smartsheet service is not available or not configured.
+        if ( ! $this->smartsheet || ! $this->smartsheet->is_configured() ) {
+            return;
+        }
+
+        // Only trigger for the core Session Data form.
+        $target_form_id = $this->get_form_id( self::FORM_SATELLITE_SESSION_DATA );
+        if ( empty( $target_form_id ) || (int) $form_id !== $target_form_id ) {
+            return;
+        }
+
+        // If no stash, the audit-log step didn't run (either the form
+        // isn't the session data form — already guarded above — or
+        // audit_log_form_* bailed for some reason). Without a scoped
+        // change list, we'd fall back to pushing blindly; instead, skip.
+        if ( ! is_array( $stash ) ) {
+            return;
+        }
+
+        $changed_field_keys = $stash['changed_field_keys'] ?? array();
+        $changed_meta_keys  = $stash['changed_meta_keys']  ?? array();
+
+        // Nothing changed → nothing to push.
+        if ( empty( $changed_field_keys ) && empty( $changed_meta_keys ) ) {
+            return;
+        }
+
+        // Resolve the session for this entry.
+        $session = $this->resolve_session_for_entry( $entry_id );
+        if ( ! $session ) {
+            return;
+        }
+
+        $session_id = (int) $session['id'];
+
+        // Only push if the session has been linked to a Smartsheet row
+        // (i.e. an admin has pulled at least once to establish the row ID).
+        global $wpdb;
+        $row_id = $wpdb->get_var( $wpdb->prepare(
+            "SELECT smartsheet_row_id FROM {$wpdb->prefix}wssp_sessions WHERE id = %d",
+            $session_id
+        ));
+
+        if ( empty( $row_id ) ) {
+            return;
+        }
+
+        // Perform the scoped push.
+        try {
+            $result = $this->smartsheet->push_session( $session_id, false, array(
+                'mode'               => 'changed_keys',
+                'changed_field_keys' => $changed_field_keys,
+                'changed_meta_keys'  => $changed_meta_keys,
+            ));
+
+            if ( empty( $result['success'] ) ) {
+                error_log( sprintf(
+                    'WSSP: Auto-push to Smartsheet failed for session #%d (entry #%d): %s',
+                    $session_id, $entry_id, $result['message'] ?? 'unknown error'
+                ) );
+            }
+        } catch ( \Exception $e ) {
+            error_log( sprintf(
+                'WSSP: Auto-push exception for session #%d: %s',
+                $session_id, $e->getMessage()
+            ) );
         }
     }
 

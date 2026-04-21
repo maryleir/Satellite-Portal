@@ -37,7 +37,7 @@ class WSSP_Reports {
     /** @var string Task status table name. */
     private $status_table;
 
-    public function __construct( WSSP_Config $config, WSSP_Audit_Log $audit, WSSP_Session_Meta $session_meta = null, WSSP_Formidable $formidable = null ) {
+    public function __construct( WSSP_Config $config, WSSP_Audit_Log $audit, ?WSSP_Session_Meta $session_meta = null, ?WSSP_Formidable $formidable = null ) {
         $this->config       = $config;
         $this->audit        = $audit;
         $this->session_meta = $session_meta ?: new WSSP_Session_Meta();

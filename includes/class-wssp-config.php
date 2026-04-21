@@ -487,14 +487,27 @@ class WSSP_Config {
         foreach ( $addon_defs as $addon_slug => $addon ) {
             $meta_key = 'addon_' . $addon_slug;
 
-            // Tier 1: Session meta (Smartsheet-confirmed — authoritative)
+            // ─── Tier 1: Session meta (Smartsheet-sourced) ───
+            // Three explicit states:
+            //   'yes' / '1' / 'true'  → active (logistics marked Yes in SS,
+            //                           OR sponsor-request latch flipped it)
+            //   'declined'            → declined (logistics or sponsor)
+            //   anything else / empty → fall through to Formidable tier
             $meta_val = strtolower( trim( (string) ( $session_meta[ $meta_key ] ?? '' ) ) );
-            if ( in_array( $meta_val, array( 'yes', '1', 'true', 'hold' ), true ) ) {
+            if ( in_array( $meta_val, array( 'yes', '1', 'true' ), true ) ) {
                 $states[ $addon_slug ] = 'active';
                 continue;
             }
+            if ( $meta_val === 'declined' ) {
+                $states[ $addon_slug ] = 'declined';
+                continue;
+            }
 
-            // Tier 2: Formidable request field from TC plugin field_keys
+            // ─── Tier 2: Formidable request field from TC plugin field_keys ───
+            // Only reached when meta hasn't been set to yes/declined yet.
+            // Once the sponsor submits the request form, the addon-request
+            // latch in WSSP_Formidable writes the meta, so subsequent calls
+            // take the Tier 1 path above.
             $field_key = ! empty( $addon['field_keys'] ) ? $addon['field_keys'][0] : '';
             if ( ! $field_key ) {
                 $states[ $addon_slug ] = 'available';

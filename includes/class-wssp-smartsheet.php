@@ -39,7 +39,7 @@ class WSSP_Smartsheet {
     /** @var array Field mapping config. */
     private $field_map;
 
-    public function __construct( WSSP_Config $config, WSSP_Session_Meta $session_meta, WSSP_Audit_Log $audit = null ) {
+    public function __construct( WSSP_Config $config, WSSP_Session_Meta $session_meta, ?WSSP_Audit_Log $audit = null ) {
         $this->config       = $config;
         $this->session_meta = $session_meta;
         $this->audit        = $audit;
@@ -361,14 +361,59 @@ class WSSP_Smartsheet {
      * ─────────────────────────────────────────── */
 
     /**
-     * Push sponsor data to Smartsheet for a session.
+     * Push data to Smartsheet for a session.
      *
-     * @param int $session_id
-     * @return array  [ 'success' => bool, 'message' => string ]
+     * Two modes:
+     *
+     *   'changed_keys' — auto-push after a sponsor form save.
+     *      Only pushes portal_keys whose underlying Formidable field was in
+     *      the provided $args['changed_field_keys'] list. Trusts the
+     *      Formidable diff; no GET to Smartsheet.  Used to scope each save
+     *      to exactly what the sponsor touched, so untouched SS cells
+     *      (entered by logistics) are never overwritten.
+     *
+     *   'diff_with_ss' — manual admin push from the session-manager page.
+     *      Fetches the current SS row, compares every 'both'-direction
+     *      field's portal value against the current SS cell, and proposes
+     *      the diff. Empty-value protection: if portal is blank but SS has
+     *      a value, the field is SKIPPED (A2 semantics) — the admin sees
+     *      it listed as protected in the preview but the SS cell is not
+     *      touched.  Use this mode when the admin corrected a logistics
+     *      field in the portal and wants it pushed back to SS.
+     *
+     * @param int   $session_id
+     * @param bool  $dry_run   If true, compute the diff and return; don't PUT.
+     * @param array $args {
+     *     @type string $mode                Required: 'changed_keys' or 'diff_with_ss'.
+     *                                       Legacy callers with no $args default to 'diff_with_ss'.
+     *     @type array  $changed_field_keys  For 'changed_keys' mode: Formidable
+     *                                       field keys that actually changed in
+     *                                       this save.
+     *     @type array  $changed_meta_keys   For 'changed_keys' mode: meta keys
+     *                                       that were written during this save
+     *                                       (e.g. by task-behavior latch triggers).
+     *                                       Either or both lists may be empty.
+     * }
+     * @return array {
+     *     @type bool   $success
+     *     @type string $message
+     *     @type bool   $dry_run
+     *     @type array  $diff          Field-level changes to push.
+     *     @type array  $skipped_fields Fields that were intentionally not pushed
+     *                                  (e.g. portal empty while SS has value).
+     *     @type int    $field_count   Number of cells sent (0 in dry_run).
+     *     @type string $row_id
+     *     @type string $mode          The mode used.
+     * }
      */
-    public function push_session( $session_id ) {
+    public function push_session( $session_id, $dry_run = false, $args = array() ) {
         if ( empty( $this->api_token ) || empty( $this->field_map ) ) {
             return array( 'success' => false, 'message' => 'Not configured.' );
+        }
+
+        $mode = $args['mode'] ?? 'diff_with_ss';
+        if ( ! in_array( $mode, array( 'changed_keys', 'diff_with_ss' ), true ) ) {
+            return array( 'success' => false, 'message' => "Invalid push mode: {$mode}" );
         }
 
         global $wpdb;
@@ -384,60 +429,369 @@ class WSSP_Smartsheet {
         $row_id   = $session['smartsheet_row_id'] ?? '';
         $sheet_id = $this->field_map['sheet_id'] ?? '';
 
+        // Resolve row ID if not yet linked (link it via a dry-run pull).
         if ( ! $row_id ) {
-            $pull_result = $this->pull_session( $session_id );
+            $pull_result = $this->pull_session( $session_id, true );
             $row_id = $pull_result['row_id'] ?? '';
-            if ( ! $row_id ) {
+
+            if ( $row_id ) {
+                $wpdb->update(
+                    $wpdb->prefix . 'wssp_sessions',
+                    array( 'smartsheet_row_id' => (string) $row_id ),
+                    array( 'id' => $session_id ),
+                    array( '%s' ),
+                    array( '%d' )
+                );
+                $session['smartsheet_row_id'] = (string) $row_id;
+            } else {
                 return array( 'success' => false, 'message' => 'No Smartsheet row ID. Pull first to link the row.' );
             }
         }
 
-        // Gather push-direction values
-        $cells    = array();
-        $columns  = $this->field_map['columns'] ?? array();
-        $meta     = $this->session_meta->get_all( $session_id );
-        $pushed_fields = array();
-
-        foreach ( $columns as $mapping ) {
-            if ( ! in_array( $mapping['direction'], array( 'push', 'both' ), true ) ) continue;
-            if ( $mapping['portal_store'] === 'skip' ) continue;
-
-            $value = null;
-
-            if ( $mapping['portal_store'] === 'meta' ) {
-                $value = $meta[ $mapping['portal_key'] ] ?? '';
-            } elseif ( $mapping['portal_store'] === 'session' ) {
-                $value = $session[ $mapping['portal_key'] ] ?? '';
-            } elseif ( $mapping['portal_store'] === 'formidable' ) {
-                $value = $this->get_formidable_value( $session, $mapping['portal_key'] );
-            }
-
-            if ( $value !== null ) {
-                $cells[] = array(
-                    'columnId' => $mapping['ss_column_id'],
-                    'value'    => $this->format_for_smartsheet( $value, $mapping ),
-                );
-                $pushed_fields[] = $mapping['portal_key'];
+        // Dispatch to the right diff-building path.
+        if ( $mode === 'changed_keys' ) {
+            $changed_field_keys = $args['changed_field_keys'] ?? array();
+            $changed_meta_keys  = $args['changed_meta_keys']  ?? array();
+            $prepared = $this->compute_push_cells_changed_keys(
+                $session_id, $session, $changed_field_keys, $changed_meta_keys
+            );
+        } else {
+            $prepared = $this->compute_push_cells_diff_with_ss( $session_id, $session, $sheet_id, $row_id );
+            if ( is_wp_error( $prepared ) ) {
+                return array( 'success' => false, 'message' => 'API error: ' . $prepared->get_error_message() );
             }
         }
+
+        $cells          = $prepared['cells'];
+        $diff           = $prepared['diff'];
+        $skipped_fields = $prepared['skipped_fields'];
+        $pushed_fields  = array_column( $diff, 'field' );
 
         if ( empty( $cells ) ) {
-            return array( 'success' => true, 'message' => 'No fields to push.' );
+            $msg = empty( $skipped_fields )
+                ? 'No fields to push.'
+                : sprintf( 'No fields to push (%d skipped by empty-value protection).', count( $skipped_fields ) );
+            return array(
+                'success'        => true,
+                'dry_run'        => $dry_run,
+                'message'        => $msg,
+                'field_count'    => 0,
+                'diff'           => array(),
+                'skipped_fields' => $skipped_fields,
+                'row_id'         => $row_id,
+                'mode'           => $mode,
+            );
         }
 
-        $result = $this->api_put( "/sheets/{$sheet_id}/rows", array(
+        // Dry run: return diff without PUTting.
+        if ( $dry_run ) {
+            $msg = sprintf( '%d field(s) would be pushed to Smartsheet.', count( $cells ) );
+            if ( ! empty( $skipped_fields ) ) {
+                $msg .= sprintf( ' %d skipped (empty-value protection).', count( $skipped_fields ) );
+            }
+            return array(
+                'success'        => true,
+                'dry_run'        => true,
+                'message'        => $msg,
+                'field_count'    => count( $cells ),
+                'diff'           => $diff,
+                'skipped_fields' => $skipped_fields,
+                'row_id'         => $row_id,
+                'mode'           => $mode,
+            );
+        }
+
+        // Commit.
+        return $this->commit_push( $session, $session_id, $sheet_id, $row_id, $cells, $diff, $pushed_fields, $skipped_fields, $mode );
+    }
+
+    /**
+     * Build the push diff for auto-push after a sponsor form save.
+     *
+     * Considers two sources, scoped by what actually changed:
+     *
+     *   1. 'push' direction + 'formidable' store: portal_key must appear in
+     *      $changed_field_keys (Formidable fields the sponsor edited).
+     *   2. 'push' direction + 'meta' store: portal_key must appear in
+     *      $changed_meta_keys (meta fields flipped by task-behavior triggers
+     *      during this same save, e.g. av_request_submitted latch).
+     *
+     * No GET to SS — we trust the Formidable before/after diff and the
+     * task-behavior trigger output.
+     *
+     * 'both'-direction fields are EXCLUDED — those are logistics-owned and
+     * are only pushed via the manual admin flow (diff_with_ss mode).
+     *
+     * @param int   $session_id
+     * @param array $session
+     * @param array $changed_field_keys List of Formidable field_keys that changed.
+     * @param array $changed_meta_keys  List of meta keys written during this save.
+     * @return array { cells, diff, skipped_fields }
+     */
+    private function compute_push_cells_changed_keys( $session_id, $session, $changed_field_keys, $changed_meta_keys = array() ) {
+        $cells = array();
+        $diff  = array();
+
+        if ( empty( $changed_field_keys ) && empty( $changed_meta_keys ) ) {
+            return array( 'cells' => $cells, 'diff' => $diff, 'skipped_fields' => array() );
+        }
+
+        $changed_field_set = array_fill_keys( $changed_field_keys, true );
+        $changed_meta_set  = array_fill_keys( $changed_meta_keys, true );
+        $columns           = $this->field_map['columns'] ?? array();
+
+        // Preload meta once if we have any meta-backed push fields to consider.
+        $meta = null;
+        if ( ! empty( $changed_meta_set ) ) {
+            $meta = $this->session_meta->get_all( $session_id );
+        }
+
+        foreach ( $columns as $mapping ) {
+            // Direction filter:
+            //   'push' + 'formidable' store → sponsor-edited field, scoped by changed_field_keys
+            //   'push' + 'meta' store        → task-behavior meta trigger, scoped by changed_meta_keys
+            //   'both' + 'meta' store        → add-on request latch, scoped by changed_meta_keys.
+            //       'both' is also read by manual admin push (diff_with_ss),
+            //       which is safe because only meta keys that a trigger
+            //       explicitly wrote this save appear in changed_meta_keys —
+            //       logistics-owned 'both' fields like session_location never
+            //       get into that set via auto-push, so we never touch them here.
+            //   anything else                 → not auto-push's job
+            $direction = $mapping['direction'] ?? '';
+            if ( ! in_array( $direction, array( 'push', 'both' ), true ) ) continue;
+
+            $store      = $mapping['portal_store'] ?? '';
+            $portal_key = $mapping['portal_key'] ?? '';
+            if ( ! $portal_key ) continue;
+
+            $value  = null;
+            $reason = '';
+
+            if ( $direction === 'push' && $store === 'formidable' ) {
+                if ( empty( $changed_field_set[ $portal_key ] ) ) continue;
+                $value  = $this->get_formidable_value( $session, $portal_key );
+                $reason = 'changed_by_sponsor';
+            } elseif ( $store === 'meta' ) {
+                // Both 'push' + meta and 'both' + meta are gated by changed_meta_keys.
+                if ( empty( $changed_meta_set[ $portal_key ] ) ) continue;
+                $value  = $meta[ $portal_key ] ?? '';
+                $reason = ( $direction === 'both' ) ? 'addon_latch' : 'meta_trigger';
+            } else {
+                // direction=both with non-meta store isn't produced by any
+                // current trigger — skip defensively.
+                continue;
+            }
+
+            if ( $value === null ) continue;
+
+            $formatted = $this->format_for_smartsheet( $value, $mapping );
+
+            $cells[] = array(
+                'columnId' => $mapping['ss_column_id'],
+                'value'    => $formatted,
+            );
+            $diff[] = array(
+                'field'     => $portal_key,
+                'value'     => $value,
+                'ss_value'  => $formatted,
+                'ss_before' => null, // auto-push does not fetch current SS
+                'ss_title'  => $mapping['ss_title'] ?? $portal_key,
+                'store'     => $store,
+                'type'      => $mapping['type'] ?? 'text',
+                'reason'    => $reason,
+            );
+        }
+
+        return array( 'cells' => $cells, 'diff' => $diff, 'skipped_fields' => array() );
+    }
+
+    /**
+     * Build the push diff for a manual admin push.
+     *
+     * Fetches the current SS row, iterates every 'both'-direction field,
+     * and proposes cells where portal value differs from the current SS cell.
+     *
+     * Empty-value protection (A2 semantics): if the portal value is empty
+     * but the SS cell has a value, the field is reported in skipped_fields
+     * and NOT pushed. This protects logistics' SS edits from being wiped by
+     * a stale (blank) portal value.
+     *
+     * Pure 'push' fields are intentionally excluded here — those are the
+     * sponsor's Formidable data and must only flow through auto-push so
+     * they're scoped to what actually changed.
+     *
+     * @param int    $session_id
+     * @param array  $session
+     * @param string $sheet_id
+     * @param string $row_id
+     * @return array|WP_Error { cells, diff, skipped_fields }
+     */
+    private function compute_push_cells_diff_with_ss( $session_id, $session, $sheet_id, $row_id ) {
+        // Fetch the current SS row so we can compare per-field.
+        $row_data = $this->api_get( "/sheets/{$sheet_id}/rows/{$row_id}" );
+        if ( is_wp_error( $row_data ) ) {
+            return $row_data;
+        }
+
+        $ss_cells_by_col = array();
+        foreach ( $row_data['cells'] ?? array() as $cell ) {
+            $ss_cells_by_col[ $cell['columnId'] ] = $cell;
+        }
+
+        $meta    = $this->session_meta->get_all( $session_id );
+        $columns = $this->field_map['columns'] ?? array();
+
+        $cells          = array();
+        $diff           = array();
+        $skipped_fields = array();
+
+        foreach ( $columns as $mapping ) {
+            if ( ( $mapping['direction'] ?? '' ) !== 'both' ) continue;
+            if ( ( $mapping['portal_store'] ?? '' ) === 'skip' ) continue;
+
+            $portal_key = $mapping['portal_key'] ?? '';
+            if ( ! $portal_key ) continue;
+
+            // Read portal value from the appropriate store.
+            $portal_value = '';
+            if ( $mapping['portal_store'] === 'meta' ) {
+                $portal_value = $meta[ $portal_key ] ?? '';
+            } elseif ( $mapping['portal_store'] === 'session' ) {
+                $portal_value = $session[ $portal_key ] ?? '';
+            }
+            // 'formidable' store is never 'both' in our current map, but if
+            // it ever is, we'd read it here; skipping for now for clarity.
+
+            $portal_str = is_array( $portal_value ) ? wp_json_encode( $portal_value ) : (string) $portal_value;
+            $portal_str = trim( $portal_str );
+
+            // Normalize portal dates to Y-m-d so comparison matches extract_cell_value().
+            if ( ( $mapping['type'] ?? '' ) === 'date' && $portal_str !== '' ) {
+                $ts = strtotime( $portal_str );
+                if ( $ts ) {
+                    $portal_str = date( 'Y-m-d', $ts );
+                }
+            }
+
+            // Normalize picklist values through the value_map the same way pull does.
+            if ( ( $mapping['type'] ?? '' ) === 'checkbox' ) {
+                // Portal stores 'yes' / '' — match the 'yes' / '' shape that extract_cell_value returns.
+                $portal_str = in_array( strtolower( $portal_str ), array( 'yes', '1', 'true' ), true ) ? 'yes' : '';
+            }
+
+            // Extract current SS value using the same conversion used for pull,
+            // so the comparison is apples-to-apples (portal format vs portal format).
+            $ss_cell = $ss_cells_by_col[ $mapping['ss_column_id'] ] ?? null;
+            $ss_portal_equiv = $this->extract_cell_value( $ss_cell, $mapping );
+            $ss_portal_equiv_str = trim( (string) $ss_portal_equiv );
+
+            // No change — skip silently.
+            if ( $portal_str === $ss_portal_equiv_str ) {
+                continue;
+            }
+
+            // Empty-value protection (A2): portal is empty but SS has a value.
+            if ( $portal_str === '' && $ss_portal_equiv_str !== '' ) {
+                $skipped_fields[] = array(
+                    'field'           => $portal_key,
+                    'ss_title'        => $mapping['ss_title'] ?? $portal_key,
+                    'store'           => $mapping['portal_store'],
+                    'ss_value'        => $ss_portal_equiv,
+                    'reason'          => 'portal_empty_ss_has_value',
+                );
+                continue;
+            }
+
+            // Real diff — push.
+            $formatted = $this->format_for_smartsheet( $portal_value, $mapping );
+            $cells[] = array(
+                'columnId' => $mapping['ss_column_id'],
+                'value'    => $formatted,
+            );
+            $diff[] = array(
+                'field'     => $portal_key,
+                'value'     => $portal_value,
+                'ss_value'  => $formatted,
+                'ss_before' => $ss_portal_equiv, // what SS currently holds, in portal format
+                'ss_title'  => $mapping['ss_title'] ?? $portal_key,
+                'store'     => $mapping['portal_store'],
+                'type'      => $mapping['type'] ?? 'text',
+                'reason'    => 'portal_differs_from_ss',
+            );
+        }
+
+        return array( 'cells' => $cells, 'diff' => $diff, 'skipped_fields' => $skipped_fields );
+    }
+
+    /**
+     * Perform the PUT and write the audit log.
+     *
+     * Shared by both push modes so the PUT + audit logic lives in one place.
+     *
+     * @return array Result array matching push_session()'s contract.
+     */
+    private function commit_push( $session, $session_id, $sheet_id, $row_id, $cells, $diff, $pushed_fields, $skipped_fields, $mode ) {
+        // Smartsheet row IDs are 18-19 digit integers that can exceed 32-bit int
+        // range. Cast to (int) would silently truncate on 32-bit PHP and would
+        // yield 0 on an empty string, producing a confusing "row.id is missing"
+        // error from the API. Validate the stored string and pass it through —
+        // Smartsheet accepts numeric string IDs ("id": "6572427401553796").
+        $row_id_str = trim( (string) $row_id );
+        if ( $row_id_str === '' || ! ctype_digit( $row_id_str ) ) {
+            return array(
+                'success' => false,
+                'message' => 'Missing or invalid Smartsheet row ID for this session. Pull from Smartsheet first to link the row.',
+            );
+        }
+
+        // PUT /sheets/{id}/rows expects a BARE JSON ARRAY of row objects as the
+        // body — NOT an object wrapped in a "rows" key. Wrapping it causes the
+        // API to treat the whole body as a single row object and report
+        // "Required object attribute(s) are missing from your request: row.id"
+        // because the top-level "rows" key doesn't match any row field.
+        // Reference: https://developers.smartsheet.com/api/smartsheet/openapi/rows
+        $row_payload = array(
             array(
-                'id'    => (int) $row_id,
+                'id'    => $row_id_str,
                 'cells' => $cells,
             ),
-        ));
+        );
+
+        $result = $this->api_put( "/sheets/{$sheet_id}/rows", $row_payload );
 
         if ( is_wp_error( $result ) ) {
             return array( 'success' => false, 'message' => 'API error: ' . $result->get_error_message() );
         }
 
-        // Audit log
+        // Per-field audit log — one entry per pushed field, with old (SS before) and new (pushed) values.
         if ( $this->audit ) {
+            foreach ( $diff as $change ) {
+                $old_value = $change['ss_before'];
+                if ( $old_value === null ) {
+                    // changed_keys mode doesn't fetch SS; record what we sent only.
+                    $old_value = '';
+                }
+                $this->audit->log( array(
+                    'session_id'  => $session_id,
+                    'event_type'  => $session['event_type'] ?? 'satellite',
+                    'action'      => 'field_edit',
+                    'source'      => 'smartsheet',
+                    'entity_type' => $change['store'] === 'session' ? 'session' : 'meta',
+                    'entity_id'   => (string) $session_id,
+                    'field_name'  => $change['field'],
+                    'old_value'   => is_array( $old_value ) ? wp_json_encode( $old_value ) : (string) $old_value,
+                    'new_value'   => is_array( $change['value'] ) ? wp_json_encode( $change['value'] ) : (string) $change['value'],
+                    'meta'        => array(
+                        'trigger'  => 'smartsheet_push',
+                        'mode'     => $mode,
+                        'ss_title' => $change['ss_title'],
+                        'reason'   => $change['reason'] ?? '',
+                        'row_id'   => $row_id,
+                    ),
+                ));
+            }
+
+            // Roll-up entry so a single push is still one-line-findable in the log.
             $this->audit->log( array(
                 'session_id'  => $session_id,
                 'event_type'  => $session['event_type'] ?? 'satellite',
@@ -448,12 +802,28 @@ class WSSP_Smartsheet {
                 'new_value'   => wp_json_encode( $pushed_fields ),
                 'meta'        => array(
                     'fields_pushed' => count( $cells ),
+                    'skipped'       => count( $skipped_fields ),
+                    'mode'          => $mode,
                     'row_id'        => $row_id,
                 ),
             ));
         }
 
-        return array( 'success' => true, 'message' => 'Pushed ' . count( $cells ) . ' fields to Smartsheet.' );
+        $msg = sprintf( 'Pushed %d field(s) to Smartsheet.', count( $cells ) );
+        if ( ! empty( $skipped_fields ) ) {
+            $msg .= sprintf( ' %d skipped (empty-value protection).', count( $skipped_fields ) );
+        }
+
+        return array(
+            'success'        => true,
+            'dry_run'        => false,
+            'message'        => $msg,
+            'field_count'    => count( $cells ),
+            'diff'           => $diff,
+            'skipped_fields' => $skipped_fields,
+            'row_id'         => $row_id,
+            'mode'           => $mode,
+        );
     }
 
     /* ───────────────────────────────────────────
@@ -464,8 +834,12 @@ class WSSP_Smartsheet {
      * Compute a field-level diff between Smartsheet values and portal state.
      *
      * Returns the proposed changes without writing anything.
-     * Also enforces empty value protection: if the Smartsheet cell is blank
-     * and the portal already has a non-empty value, the field is skipped.
+     *
+     * Empty value protection is scoped to 'both' direction fields only.
+     * For pure 'pull' fields, Smartsheet is the source of truth — if
+     * logistics clears a value there, the portal should reflect that.
+     * For 'both' direction fields (editable in either system), a blank
+     * Smartsheet cell won't overwrite a non-empty portal value.
      *
      * @param int   $session_id
      * @param array $session       Session row from DB.
@@ -526,15 +900,19 @@ class WSSP_Smartsheet {
             $raw_idx = count( $raw_values ) - 1;
 
             // ─── Empty value protection ───
-            // Don't overwrite existing portal data with a blank Smartsheet cell.
-            if ( $new_value === '' && $old_value !== '' ) {
+            // Only applies to 'both' direction fields where either system
+            // may have the newer value.  For pure 'pull' fields, Smartsheet
+            // is the source of truth — if logistics clears a value there,
+            // the portal should reflect that.
+            if ( $new_value === '' && $old_value !== '' && $mapping['direction'] === 'both' ) {
                 $skipped++;
                 $skipped_fields[] = array(
                     'field'          => $key,
                     'ss_title'       => $ss_title,
                     'protected_value' => $old_value,
+                    'direction'      => $mapping['direction'],
                 );
-                $raw_values[ $raw_idx ]['outcome'] = 'skipped (empty protection)';
+                $raw_values[ $raw_idx ]['outcome'] = 'skipped (empty protection — both direction)';
                 continue;
             }
 
@@ -670,10 +1048,44 @@ class WSSP_Smartsheet {
                 return $raw ? 'yes' : '';
 
             case 'picklist':
-                if ( ! empty( $mapping['value_map'] ) && isset( $mapping['value_map'][ $value ] ) ) {
-                    return $mapping['value_map'][ $value ];
+                $value_str = (string) $value;
+
+                // Empty cell → empty portal value, no lookup needed.
+                if ( trim( $value_str ) === '' ) {
+                    return '';
                 }
-                return (string) $value;
+
+                if ( ! empty( $mapping['value_map'] ) ) {
+                    // Try direct match first (fast path, exact case).
+                    if ( isset( $mapping['value_map'][ $value_str ] ) ) {
+                        return $mapping['value_map'][ $value_str ];
+                    }
+                    // Fall back to case-insensitive match. Avoids silent
+                    // failures when SS uses 'Yes' but someone typed the
+                    // value_map key as 'yes' (or vice versa).
+                    $needle = strtolower( trim( $value_str ) );
+                    foreach ( $mapping['value_map'] as $ss_label => $portal_val ) {
+                        if ( strtolower( trim( (string) $ss_label ) ) === $needle ) {
+                            return $portal_val;
+                        }
+                    }
+
+                    // Unmapped picklist value: the SS column has a value
+                    // that isn't in our config's value_map. Log a warning
+                    // so this can be fixed, and return empty rather than
+                    // storing the raw string (which would cause case-
+                    // sensitivity mismatches downstream like 'Yes' vs 'yes').
+                    error_log( sprintf(
+                        'WSSP: Unmapped picklist value "%s" for column "%s" (portal_key=%s). Update value_map in smartsheet-field-map.php.',
+                        $value_str,
+                        $mapping['ss_title'] ?? '(unknown)',
+                        $mapping['portal_key'] ?? '(unknown)'
+                    ) );
+                    return '';
+                }
+
+                // No value_map configured → return raw string as before.
+                return $value_str;
 
             case 'date':
                 $value = trim( (string) $value );
@@ -694,9 +1106,35 @@ class WSSP_Smartsheet {
 
         switch ( $type ) {
             case 'checkbox':
-                return in_array( $value, array( 'yes', '1', 'true', true ), true );
+                // Portal values for push-to-checkbox can arrive in several shapes:
+                //   - bool true/false or 1/0 (meta written programmatically)
+                //   - 'yes'/'' (meta written by latch triggers)
+                //   - 'Yes'/'No' (Formidable radio buttons, case varies)
+                //   - '1'/'0' or ['Yes'] arrays (Formidable checkbox fields)
+                // Normalize all truthy shapes to boolean true; everything
+                // else (including 'no', '0', '', null, 'decline') to false.
+                if ( is_array( $value ) ) {
+                    // Multi-value field (e.g. checkbox group). Treat as checked
+                    // if at least one truthy selection is present.
+                    foreach ( $value as $v ) {
+                        if ( $this->is_truthy_checkbox_value( $v ) ) return true;
+                    }
+                    return false;
+                }
+                return $this->is_truthy_checkbox_value( $value );
 
             case 'picklist':
+                // Prefer an explicit push_value_map when present, for
+                // asymmetric maps where multiple SS values share one
+                // portal value and we need to pick a specific one on
+                // push. No current mapping uses this, but the mechanism
+                // stays available.
+                if ( ! empty( $mapping['push_value_map'] ) && isset( $mapping['push_value_map'][ $value ] ) ) {
+                    return $mapping['push_value_map'][ $value ];
+                }
+                // Fallback: derive push mapping by flipping value_map.
+                // Safe for symmetric 1:1 maps (like add-ons with Yes↔yes,
+                // No↔declined and CE status).
                 if ( ! empty( $mapping['value_map'] ) ) {
                     $reverse = array_flip( $mapping['value_map'] );
                     if ( isset( $reverse[ $value ] ) ) {
@@ -708,6 +1146,36 @@ class WSSP_Smartsheet {
             default:
                 return (string) $value;
         }
+    }
+
+    /**
+     * Is this scalar value an affirmative checkbox/radio signal?
+     *
+     * Used by the push-side checkbox formatter to tolerate the variety of
+     * value shapes that can arrive from Formidable, session meta, and
+     * programmatic writes. Case-insensitive.
+     *
+     * @param mixed $value
+     * @return bool
+     */
+    private function is_truthy_checkbox_value( $value ) {
+        if ( $value === true ) return true;
+        if ( $value === false || $value === null ) return false;
+
+        $v = strtolower( trim( (string) $value ) );
+        if ( $v === '' ) return false;
+
+        // Explicit negatives — always false.
+        static $negatives = array( 'no', '0', 'false', 'decline', 'declined', 'not interested', 'off' );
+        if ( in_array( $v, $negatives, true ) ) return false;
+
+        // Explicit affirmatives.
+        static $affirmatives = array( 'yes', '1', 'true', 'approved', 'on', 'checked' );
+        if ( in_array( $v, $affirmatives, true ) ) return true;
+
+        // Anything else — ambiguous; default to false for safety.
+        // (Better to leave an SS checkbox unchecked than to check it in error.)
+        return false;
     }
 
     /**

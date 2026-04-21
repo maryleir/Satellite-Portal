@@ -163,6 +163,22 @@
         </div>
     <?php endif;
 endif; ?>
+
+<!-- ═══════════════════════════════════════════
+     Smartsheet Push Preview (shown after dry-run)
+     ═══════════════════════════════════════════ -->
+<?php if ( ! empty( $_GET['ss_push_preview'] ) ) :
+    $session_id = (int) $session['id'];
+    $ss_preview = get_transient( 'wssp_ss_push_preview_' . $session_id );
+    if ( $ss_preview ) :
+        $preview_type = 'push';
+        include WSSP_PLUGIN_DIR . 'admin/views/smartsheet-preview.php';
+    else : ?>
+        <div class="notice notice-warning is-dismissible">
+            <p>Preview expired — please try the push again.</p>
+        </div>
+    <?php endif;
+endif; ?>
  
 <div class="wssp-card">
     <h2>Smartsheet Sync</h2>

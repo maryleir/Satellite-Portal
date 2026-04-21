@@ -7,9 +7,24 @@
  *   - ss_column_id:  Smartsheet column ID (from API)
  *   - ss_title:      Smartsheet column title (for reference only)
  *   - portal_key:    Where to store in the portal
- *   - portal_store:  'meta' (wssp_session_meta), 'session' (wssp_sessions table), or 'skip'
+ *   - portal_store:  'meta' (wssp_session_meta), 'session' (wssp_sessions table),
+ *                    'formidable' (Formidable form entry), or 'skip'
  *   - direction:     'pull' (SS→portal), 'push' (portal→SS), 'both', or 'skip'
  *   - type:          'text', 'checkbox', 'picklist', 'date' — for value conversion
+ *
+ * DIRECTION SEMANTICS:
+ *   pull  — SS is the source of truth. Pull overwrites portal freely,
+ *           including clearing to empty. No path sends portal → SS.
+ *   push  — Portal is the source of truth. Auto-push on form save sends
+ *           only the fields the sponsor changed (no blind overwrites).
+ *           These fields never pull.
+ *   both  — Logistics-owned fields that can be corrected from either side.
+ *           Pulled at import; admin can push corrections via manual push.
+ *           Pull applies empty-value protection: a blank SS cell will NOT
+ *           overwrite a non-empty portal value. Manual admin push compares
+ *           against current SS cell and only sends fields that differ, and
+ *           skips fields where portal is empty but SS has a value.
+ *   skip  — Column listed for documentation only; not synced.
  *
  * Sheet ID: 519319206186884
  *
@@ -59,17 +74,17 @@ return array(
             'ss_title'     => 'Short Name',
             'portal_key'   => 'short_name',
             'portal_store' => 'session',
-            'direction'    => 'pull',
+            'direction'    => 'both', // Logistics-owned; admin can push corrections.
             'type'         => 'text',
        ),
 
-        // ─── Schedule (pull from SS) ───
+        // ─── Schedule (logistics-owned; pull at import, admin may push corrections) ───
         array(
             'ss_column_id' => 8362096767750020,
             'ss_title'     => 'Day',
             'portal_key'   => 'session_day',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'text',
         ),
         array(
@@ -77,7 +92,7 @@ return array(
             'ss_title'     => 'Date',
             'portal_key'   => 'session_date',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'date',
         ),
         array(
@@ -85,7 +100,7 @@ return array(
             'ss_title'     => 'Time',
             'portal_key'   => 'session_time',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'text',
         ),
         array(
@@ -93,29 +108,29 @@ return array(
             'ss_title'     => 'Location',
             'portal_key'   => 'session_location',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'text',
         ),
 
-        // ─── Sponsor info (pull from SS) ───
+        // ─── Sponsor info (logistics-owned; pull at import, admin may push corrections) ───
         array(
             'ss_column_id' => 7799146814328708,
             'ss_title'     => 'Sponsor',
             'portal_key'   => 'sponsor_name',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'text',
         ),
         array(
             'ss_column_id' => 128953698963332,
             'ss_title'     => 'Company Contact (do not include in logistics)',
             'portal_key'   => 'company_contact',
-            'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'portal_store' => 'skip',
+            'direction'    => 'skip', // Not used anywhere in the portal.
             'type'         => 'text',
         ),
 
-        // ─── Contacts (pull from SS initially, push from portal) ───
+        // ─── Topic (logistics-owned; from Satellite application) ───
         array(
             'ss_column_id' => 2169647280115588,
             'ss_title'     => 'Topic',
@@ -180,89 +195,116 @@ return array(
             'ss_column_id' => 1254853605805956,
             'ss_title'     => 'Lead Retrival #',
             'portal_key'   => 'lead_retrieval_number',
-            'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'portal_store' => 'skip',
+            'direction'    => 'skip',
             'type'         => 'text',
         ),
         array(
             'ss_column_id' => 7236196860907396,
             'ss_title'     => 'Lead retrival',
             'portal_key'   => 'lead_retrieval_count',
-            'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'portal_store' => 'skip',
+            'direction'    => 'skip',
             'type'         => 'text',
         ),
         array(
             'ss_column_id' => 5758453233176452,
             'ss_title'     => 'Lead Retrival Report Sent',
             'portal_key'   => 'lead_report_sent',
-            'portal_store' => 'meta',
-            'direction'    => 'both',
+            'portal_store' => 'skip',
+            'direction'    => 'skip',
             'type'         => 'checkbox',
         ),
         array(
             'ss_column_id' => 1606697326694276,
             'ss_title'     => 'In Person Count',
             'portal_key'   => 'in_person_count',
-            'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'portal_store' => 'skip',
+            'direction'    => 'skip',
             'type'         => 'text',
         ),
 
-        // ─── Add-on purchases (pull from SS) ───
+        // ─── Add-on purchases / requests ───
+        // Bidirectional. SS dropdown has two values: 'Yes' (logistics
+        // purchased OR sponsor requested — logistics doesn't need to know
+        // which) and 'No' (sponsor declined). Empty means "not yet answered."
+        //
+        // Portal meta stores 'yes' / 'declined' / ''. The value_map is
+        // symmetric, so push uses the default array_flip fallback in
+        // format_for_smartsheet(). See:
+        //   - apply_addon_request_triggers() in WSSP_Formidable
+        //   - compute_addon_states() in WSSP_Config
+        //
+        // Pull is case-insensitive at the lookup layer, so SS can keep
+        // 'Yes'/'No' (natural reading) while portal stores 'yes'/'declined'.
         array(
             'ss_column_id' => 691903652384644,
             'ss_title'     => '2nd FTS - Purchased',
             'portal_key'   => 'addon_additional_fts',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'picklist',
-            'value_map'    => array( 'Yes' => 'yes', 'No' => '', 'Hold' => 'hold' ),
+            'value_map'    => array(
+                'Yes' => 'yes',
+                'No'  => 'declined',
+            ),
         ),
         array(
             'ss_column_id' => 5195503279755140,
             'ss_title'     => 'Push Notification - Purchased',
             'portal_key'   => 'addon_push_notification',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'picklist',
-            'value_map'    => array( 'Yes' => 'yes', 'No' => '', 'Hold' => 'hold' ),
+            'value_map'    => array(
+                'Yes' => 'yes',
+                'No'  => 'declined',
+            ),
         ),
         array(
             'ss_column_id' => 2943703466069892,
             'ss_title'     => 'Door Drop - Purchased',
             'portal_key'   => 'addon_hotel_door_drop',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'picklist',
-            'value_map'    => array( 'Yes' => 'yes', 'No' => '', 'Hold' => 'hold' ),
+            'value_map'    => array(
+                'Yes' => 'yes',
+                'No'  => 'declined',
+            ),
         ),
         array(
             'ss_column_id' => 7447303093440388,
             'ss_title'     => 'Program Advertisement - Purchased',
             'portal_key'   => 'addon_program_advertisement',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'picklist',
-            'value_map'    => array( 'Yes' => 'yes', 'No' => '', 'Hold' => 'hold' ),
+            'value_map'    => array(
+                'Yes' => 'yes',
+                'No'  => 'declined',
+            ),
         ),
         array(
             'ss_column_id' => 8573203000283012,
             'ss_title'     => 'Recording - Purchased',
             'portal_key'   => 'addon_recording',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'picklist',
-            'value_map'    => array( 'Yes' => 'yes', 'No' => '', 'Hold' => 'hold' ),
+            'value_map'    => array(
+                'Yes' => 'yes',
+                'No'  => 'declined',
+            ),
         ),
 
-        // ─── AV (mixed: pull contact from SS, push request status) ───
+        // ─── AV contact (logistics-owned) + AV request status (portal → SS) ───
         array(
             'ss_column_id' => 6321403186597764,
             'ss_title'     => 'Assigned AV Contact',
             'portal_key'   => 'av_contact_name',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'text',
         ),
         array(
@@ -274,13 +316,13 @@ return array(
             'type'         => 'checkbox',
         ),
 
-        // ─── Rehearsal (pull from SS) ───
+        // ─── Rehearsal (logistics-owned; pull at import, admin may push corrections) ───
         array(
             'ss_column_id' => 8291728023572356,
             'ss_title'     => 'Rehearsal Day',
             'portal_key'   => 'rehearsal_day',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'text',
         ),
         array(
@@ -288,7 +330,7 @@ return array(
             'ss_title'     => 'Rehearsal Date',
             'portal_key'   => 'rehearsal_date',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'date',
         ),
         array(
@@ -296,7 +338,7 @@ return array(
             'ss_title'     => 'Allotted Time Slot',
             'portal_key'   => 'rehearsal_time',
             'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'direction'    => 'both',
             'type'         => 'text',
         ),
         array(
@@ -320,8 +362,8 @@ return array(
         array(
             'ss_column_id' => 4914028303044484,
             'ss_title'     => 'Approved To Be Uploaded OnDemand',
-            'portal_key'   => 'od_approved_for_upload',
-            'portal_store' => 'meta',
+            'portal_key'   => 'wssp_od_recording_approved',
+            'portal_store' => 'formidable',
             'direction'    => 'push',
             'type'         => 'checkbox',
         ),
@@ -357,8 +399,8 @@ return array(
             'ss_column_id' => 6602878163308420,
             'ss_title'     => 'OnDemand Count',
             'portal_key'   => 'on_demand_count',
-            'portal_store' => 'meta',
-            'direction'    => 'pull',
+            'portal_store' => 'skip',
+            'direction'    => 'skip',
             'type'         => 'text',
         ),
 

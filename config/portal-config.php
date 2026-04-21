@@ -28,6 +28,26 @@ return array(
         /* ─── TASK BEHAVIOR OVERRIDES ─────────── *
          * Only tasks that differ from the default
          * (type=form, owner=sponsor) need entries.
+         *
+         * Supported keys:
+         *   type          — 'form' (default), 'upload', 'info', 'approval',
+         *                   'review_approval'
+         *   owner         — 'sponsor' (default), 'logistics'
+         *   file_type     — for type=upload, which file_type slug
+         *   condition     — visibility condition slug (see condition-evaluator)
+         *   addon         — add-on slug this task is gated by
+         *   completable   — false = form available but no completion checkbox
+         *   latch_meta_on_form_engagement — when the sponsor saves the
+         *       session-data form and this task is in the affected_tasks
+         *       (i.e. at least one of its field_keys changed), set the
+         *       given meta key to the given value if not already set.
+         *       One-shot: never flips back to empty. Used for signalling
+         *       to logistics that the sponsor has engaged with a form
+         *       section. Shape:
+         *           'latch_meta_on_form_engagement' => array(
+         *               'meta_key' => 'av_request_submitted',
+         *               'value'    => 'yes',
+         *           ),
          * ─────────────────────────────────────── */
         'task_behavior' => array(
 
@@ -49,6 +69,19 @@ return array(
             
             // Non-completable tasks — form available but no checkbox
             'logistics-contacts'         => array( 'completable' => false ),
+
+            // AV request — one-shot latch to signal logistics that the
+            // sponsor has submitted their AV requirements. The AV form
+            // has required fields so Formidable won't fire the save hook
+            // unless the required fields are populated; if this task
+            // appears in the affected_tasks after a save, we can safely
+            // flip the latch.
+            'av-request-form' => array(
+                'latch_meta_on_form_engagement' => array(
+                    'meta_key' => 'av_request_submitted',
+                    'value'    => 'yes',
+                ),
+            ),
 
             // Tasks in OTHER phases that are gated by an add-on purchase.
             // The 'addon' slug must match the derived slug from manage-add-ons

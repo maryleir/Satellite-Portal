@@ -125,7 +125,8 @@ add_action( 'plugins_loaded', function () {
 
 
     // Formidable service — always instantiated early because it registers hooks
-    $formidable   = new WSSP_Formidable( $audit, $config, $dashboard );
+    // Receives $smartsheet so it can auto-push form values to the master sheet.
+    $formidable   = new WSSP_Formidable( $audit, $config, $dashboard, $smartsheet );
     new WSSP_REST_Meeting_Planners( $access );
 
 
@@ -140,5 +141,5 @@ add_action( 'plugins_loaded', function () {
     new WSSP_Public( $config, $access, $dashboard, $task_content, $session_meta, $formidable );
 
     // REST API — pass if you expose any Formidable-backed endpoints
-    new WSSP_REST( $config, $access, $audit, $formidable );
+    new WSSP_REST( $config, $access, $audit, $formidable, $smartsheet );
 });

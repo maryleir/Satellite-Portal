@@ -71,6 +71,7 @@ class WSSP_Admin {
         
         add_action( 'admin_post_wssp_smartsheet_pull_confirm', array( $this, 'handle_smartsheet_pull_confirm' ) );
         add_action( 'admin_post_wssp_smartsheet_pull_all_confirm', array( $this, 'handle_smartsheet_pull_all_confirm' ) );
+        add_action( 'admin_post_wssp_smartsheet_push_confirm', array( $this, 'handle_smartsheet_push_confirm' ) );
 
         
         // Add the sync handler and report page
@@ -405,20 +406,22 @@ class WSSP_Admin {
         if ( ! is_array( $meta_input ) ) {
             wp_die( 'Invalid data.' );
         }
- 
-        // Define which keys are checkbox fields (unchecked = not in POST)
-        $checkbox_keys = array(
-            'lead_report_sent',
-        );
- 
-        // Add-on checkboxes
+
+        // ─── Tristate add-on handling ───
+        // Add-ons are now radio groups with three states: 'yes', 'declined',
+        // and '' (Not set). Unlike checkboxes, a radio group always submits
+        // its selected value — so we don't need a "missing from POST → ''"
+        // fallback here. Accept the posted value directly as one of the
+        // three valid states.
         $addons_config = $this->config->get_addons(
             $this->get_session( $session_id )['event_type'] ?? 'satellite'
         );
+        $addon_meta_keys = array();
         foreach ( $addons_config as $slug => $addon ) {
-            $checkbox_keys[] = 'addon_' . $slug;
+            $addon_meta_keys[] = 'addon_' . $slug;
         }
- 
+        $valid_addon_states = array( 'yes', 'declined', '' );
+
         // Process each meta value
         $clean = array();
         foreach ( $meta_input as $key => $value ) {
@@ -429,11 +432,13 @@ class WSSP_Admin {
                 $clean[ $key ] = sanitize_text_field( $value );
             }
         }
- 
-        // Handle unchecked checkboxes (they won't be in POST)
-        foreach ( $checkbox_keys as $cb_key ) {
-            if ( ! isset( $clean[ $cb_key ] ) ) {
-                $clean[ $cb_key ] = '';
+
+        // Validate add-on values — coerce anything unexpected to '' so we
+        // can't land garbage in meta that would break the admin view or
+        // downstream sync. Legitimate values passed through unchanged.
+        foreach ( $addon_meta_keys as $addon_key ) {
+            if ( isset( $clean[ $addon_key ] ) && ! in_array( $clean[ $addon_key ], $valid_addon_states, true ) ) {
+                $clean[ $addon_key ] = '';
             }
         }
  
@@ -474,10 +479,6 @@ public function handle_smartsheet_pull() {
  
     // Step 1: Dry run — show preview
     $result = $this->smartsheet->pull_session( $session_id, true );
- 
-    // DEBUG: Log the full result to wp-content/debug.log
-    // Remove this line once debugging is complete
-    error_log( 'WSSP SS Pull Dry Run (session ' . $session_id . '): ' . wp_json_encode( $result, JSON_PRETTY_PRINT ) );
  
     if ( ! $result['success'] ) {
         $msg = urlencode( $result['message'] );
@@ -595,18 +596,62 @@ public function handle_smartsheet_pull() {
     }
  
     /**
-     * Push a single session to Smartsheet.
+     * Push a single session to Smartsheet — DRY RUN first.
      */
     public function handle_smartsheet_push() {
         check_admin_referer( 'wssp_smartsheet_push' );
         if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized.' );
  
         $session_id = absint( $_POST['session_id'] ?? 0 );
-        $result = $this->smartsheet->push_session( $session_id );
- 
+
+        // Step 1: Dry run — show preview
+        $result = $this->smartsheet->push_session( $session_id, true );
+
+        if ( ! $result['success'] ) {
+            $msg = urlencode( $result['message'] );
+            wp_safe_redirect( admin_url(
+                "admin.php?page=wssp-manage-session&session_id={$session_id}&ss_error=1&ss_msg={$msg}"
+            ));
+            exit;
+        }
+
+        // If nothing to push, skip preview
+        if ( empty( $result['diff'] ) ) {
+            $msg = urlencode( $result['message'] );
+            wp_safe_redirect( admin_url(
+                "admin.php?page=wssp-manage-session&session_id={$session_id}&ss_pushed=1&ss_msg={$msg}"
+            ));
+            exit;
+        }
+
+        // Store the preview in a transient so confirm step doesn't need another lookup
+        set_transient( 'wssp_ss_push_preview_' . $session_id, $result, 300 ); // 5 min TTL
+
+        // Redirect to session page with push preview flag
+        wp_safe_redirect( admin_url(
+            "admin.php?page=wssp-manage-session&session_id={$session_id}&ss_push_preview=1"
+        ));
+        exit;
+    }
+
+    /**
+     * Confirm and commit a single session push after preview.
+     */
+    public function handle_smartsheet_push_confirm() {
+        check_admin_referer( 'wssp_smartsheet_push_confirm' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized.' );
+
+        $session_id = absint( $_POST['session_id'] ?? 0 );
+
+        // Clear the preview transient
+        delete_transient( 'wssp_ss_push_preview_' . $session_id );
+
+        // Commit the push (not dry run)
+        $result = $this->smartsheet->push_session( $session_id, false );
+
         $status = $result['success'] ? 'ss_pushed' : 'ss_error';
         $msg    = urlencode( $result['message'] );
- 
+
         wp_safe_redirect( admin_url(
             "admin.php?page=wssp-manage-session&session_id={$session_id}&{$status}=1&ss_msg={$msg}"
         ));

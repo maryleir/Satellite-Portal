@@ -29,19 +29,24 @@ class WSSP_REST {
     
     /** @var WSSP_Formidable */
     private $formidable;
+    
+    /** @var WSSP_Smartsheet */
+    private $smartsheet;
+
 
 
     /** @var string REST namespace. */
     private $namespace = 'wssp/v1';
-
-    public function __construct( WSSP_Config $config, WSSP_Session_Access $access, WSSP_Audit_Log $audit, WSSP_Formidable $formidable ) {
-        $this->config = $config;
-        $this->access = $access;
-        $this->audit  = $audit;
-        $this->formidable = $formidable;
-
+    
+    public function __construct( WSSP_Config $config, WSSP_Session_Access $access, WSSP_Audit_Log $audit, WSSP_Formidable $formidable, WSSP_Smartsheet $smartsheet ) {
+        $this->config      = $config;
+        $this->access      = $access;
+        $this->audit       = $audit;
+        $this->formidable  = $formidable;
+        $this->smartsheet  = $smartsheet;
         add_action( 'rest_api_init', array( $this, 'register_routes' ) );
     }
+
 
     /* ───────────────────────────────────────────
      * ROUTE REGISTRATION
