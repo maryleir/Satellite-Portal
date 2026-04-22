@@ -69,17 +69,10 @@ $phase_number = 0;
 
             $total_actionable++;
 
-            // Check if done: dashboard engine status OR add-on responded OR submitted
+            // Done-state follows the standard rule: status row only.
+            // Addon status is written by sync_addon_task_statuses (SS import)
+            // or apply_addon_request_triggers (sponsor form latch).
             $t_done = ! empty( $t['is_done'] ) || ! empty( $t['is_submitted'] );
-
-            // Add-on selection tasks: done when sponsor has responded
-            if ( ! $t_done && preg_match( '/-addon$/', $t['key'] ) ) {
-                $t_addon_slug = str_replace( '-', '_', preg_replace( '/-addon$/', '', $t['key'] ) );
-                $t_addon_state = isset( $addon_states ) ? ( $addon_states[ $t_addon_slug ] ?? 'available' ) : 'available';
-                if ( in_array( $t_addon_state, array( 'active', 'declined' ), true ) ) {
-                    $t_done = true;
-                }
-            }
 
             if ( $t_done ) $total_done++;
         }
@@ -122,13 +115,12 @@ $phase_number = 0;
                                 data-modal-type="more_info"
                                 title="Phase information"
                                 aria-label="View phase information">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2" stroke-linecap="round">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                                 <circle cx="12" cy="12" r="10"/>
                                 <line x1="12" y1="16" x2="12" y2="12"/>
                                 <circle cx="12" cy="8" r="1.2" fill="currentColor" stroke="none"/>
                             </svg>
                         </button>
-                        
                     <?php endif; ?>
                     <svg class="wssp-phase__chevron" width="20" height="20" viewBox="0 0 24 24"
                          fill="none" stroke="currentColor" stroke-width="2">

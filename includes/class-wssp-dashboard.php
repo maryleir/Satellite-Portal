@@ -92,7 +92,9 @@ class WSSP_Dashboard {
      * @param int    $session_id
      * @param string $task_key
      * @param string $new_status
-     * @param array  $extra  Optional: submitted_by, reviewed_by, review_note.
+     * @param array  $extra  Optional: submitted_by (override current user,
+     *                       e.g. pass 0 for system-initiated actions like
+     *                       Smartsheet imports), review_note.
      * @return bool
      */
     public function set_task_status( $session_id, $task_key, $new_status, $extra = array() ) {
@@ -112,7 +114,12 @@ class WSSP_Dashboard {
         // reviewed_at/reviewed_by   = logistics-initiated actions
         if ( in_array( $new_status, array( 'in_progress', 'acknowledged', 'submitted_by_sponsor', 'complete' ), true ) ) {
             $data['submitted_at'] = current_time( 'mysql' );
-            $data['submitted_by'] = get_current_user_id();
+            // Callers can explicitly set submitted_by (e.g. 0 for system
+            // actions like Smartsheet imports). Falls back to the current
+            // user when not provided.
+            $data['submitted_by'] = array_key_exists( 'submitted_by', $extra )
+                ? (int) $extra['submitted_by']
+                : get_current_user_id();
             $formats[] = '%s';
             $formats[] = '%d';
         }
@@ -227,15 +234,9 @@ class WSSP_Dashboard {
                 $is_done      = in_array( $status, array( 'approved', 'complete' ), true );
                 $is_submitted = $status === 'submitted_by_sponsor';
 
-                // Add-on tasks: responded (active or declined) = done
-                $is_addon_task = (bool) preg_match( '/-addon$/', $task_key );
-                if ( $is_addon_task && ! $is_done ) {
-                    $addon_slug  = str_replace( '-', '_', preg_replace( '/-addon$/', '', $task_key ) );
-                    $addon_state = $addon_states[ $addon_slug ] ?? 'available';
-                    if ( in_array( $addon_state, array( 'active', 'declined' ), true ) ) {
-                        $is_done = true;
-                    }
-                }
+                // Addons follow the standard done-state rule (status row only).
+                // Status is written by sync_addon_task_statuses (SS import path)
+                // and apply_addon_request_triggers (form latch path).
 
                 // Non-completable tasks are never done/overdue
                 $completable = $task['completable'] ?? true;
@@ -673,12 +674,7 @@ class WSSP_Dashboard {
 
                 $total++;
 
-                // Add-on selection tasks (slug ends in -addon) are "done" when responded to
-                $is_addon = (bool) preg_match( '/-addon$/', $task['key'] );
-                $addon_slug = $is_addon ? str_replace( '-', '_', preg_replace( '/-addon$/', '', $task['key'] ) ) : '';
-                $addon_responded = $is_addon && in_array( $addon_states[ $addon_slug ] ?? '', array( 'active', 'declined' ), true );
-
-                if ( $task['is_done'] || $task['is_submitted'] || $addon_responded ) {
+                if ( $task['is_done'] || $task['is_submitted'] ) {
                     $completed++;
                     continue;
                 }

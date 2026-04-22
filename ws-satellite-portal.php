@@ -142,6 +142,11 @@ add_action( 'plugins_loaded', function () {
     // already depends on WSSP_Smartsheet in its constructor.
     $smartsheet->set_formidable( $formidable );
 
+    // Back-reference: Smartsheet needs the Dashboard service to write
+    // task status rows during addon pulls (so admin reactivate has a
+    // row to operate on). Done as a setter to avoid constructor cycles.
+    $smartsheet->set_dashboard( $dashboard );
+
     // Contacts-for-Logistics → session access sync.
     // Must come after $formidable so its hooks are registered in the
     // right order; the sync hooks in at priority 37, after Formidable's

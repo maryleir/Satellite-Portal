@@ -41,6 +41,15 @@ class WSSP_Smartsheet {
      */
     private $formidable;
 
+    /**
+     * Dashboard service — set post-construction. Used by apply_pull_changes()
+     * to write task status rows when addon meta is latched by a pull, so
+     * that every "done" addon task has a real row in wssp_task_status.
+     *
+     * @var WSSP_Dashboard|null
+     */
+    private $dashboard;
+
     /** @var string API base URL. */
     private $api_base = 'https://api.smartsheet.com/2.0';
 
@@ -66,6 +75,17 @@ class WSSP_Smartsheet {
      */
     public function set_formidable( WSSP_Formidable $formidable ) {
         $this->formidable = $formidable;
+    }
+
+    /**
+     * Inject the Dashboard service. Called from the bootstrap after both
+     * Smartsheet and Dashboard have been instantiated. Used by
+     * apply_pull_changes() to write task status rows alongside addon meta.
+     *
+     * @param WSSP_Dashboard $dashboard
+     */
+    public function set_dashboard( WSSP_Dashboard $dashboard ) {
+        $this->dashboard = $dashboard;
     }
 
     /* ───────────────────────────────────────────
@@ -1010,6 +1030,14 @@ class WSSP_Smartsheet {
             $updated += count( $diff_result['session_updates'] );
         }
 
+        // ─── Addon task status sync: imported-affirmative → complete row ───
+        $this->sync_addon_task_statuses( $session_id, $session, $diff_result );
+
+        // ─── Addon blank-pull carve-out: blank SS cell → clear latched addon ───
+        // Intentionally bypasses the empty-protection skip in compute_pull_diff()
+        // for addon fields only. See method docblock for rationale.
+        $this->clear_addons_on_blank_pull( $session_id, $session, $diff_result );
+
         // ─── Audit log: one entry per changed field ───
         if ( $this->audit && ! empty( $diff_result['diff'] ) ) {
             foreach ( $diff_result['diff'] as $change ) {
@@ -1032,6 +1060,185 @@ class WSSP_Smartsheet {
         }
 
         return $updated;
+    }
+
+    /**
+     * Sync wssp_task_status rows for addon tasks whose meta was just
+     * written by a Smartsheet pull.
+     *
+     * For each changed meta entry that corresponds to an `addon_{slug}`
+     * key whose slug matches a registered addon task:
+     *   - affirmative value ('yes' / '1' / 'true') AND task is not
+     *     already in a terminal status → write 'complete' with
+     *     submitted_by=0 (system marker).
+     *   - any other value → no-op here (declines don't originate from
+     *     SS, and blanks are handled by clear_addons_on_blank_pull).
+     *
+     * System-completed rows use submitted_by=0 so the reactivate path
+     * can distinguish them from sponsor-completed rows.
+     *
+     * @param int   $session_id
+     * @param array $session      Session row.
+     * @param array $diff_result  Output from compute_pull_diff().
+     * @return void
+     */
+    private function sync_addon_task_statuses( $session_id, $session, $diff_result ) {
+        if ( ! $this->dashboard || empty( $diff_result['meta_updates'] ) ) {
+            return;
+        }
+
+        $event_type = $session['event_type'] ?? 'satellite';
+        $addons     = $this->config->get_addons( $event_type );
+        if ( empty( $addons ) ) {
+            return;
+        }
+
+        // Build lookup: 'addon_{slug}' meta key → task_key.
+        $meta_key_to_task = array();
+        foreach ( $addons as $addon_slug => $addon ) {
+            if ( ! empty( $addon['task_key'] ) ) {
+                $meta_key_to_task[ 'addon_' . $addon_slug ] = $addon['task_key'];
+            }
+        }
+
+        foreach ( $diff_result['meta_updates'] as $meta_key => $new_value ) {
+            $task_key = $meta_key_to_task[ $meta_key ] ?? null;
+            if ( ! $task_key ) continue;
+
+            $normalized = strtolower( trim( (string) $new_value ) );
+            $is_affirmative = in_array( $normalized, array( 'yes', '1', 'true' ), true );
+            if ( ! $is_affirmative ) {
+                continue; // declines don't occur on import; blanks handled separately.
+            }
+
+            // Only write if task isn't already terminal. Never downgrade
+            // a sponsor-completed or approved row.
+            $current = $this->dashboard->get_task_status( $session_id, $task_key );
+            if ( in_array( $current, array( 'complete', 'approved' ), true ) ) {
+                continue;
+            }
+
+            $this->dashboard->set_task_status( $session_id, $task_key, 'complete', array(
+                'submitted_by' => 0,
+            ) );
+
+            // Supplementary audit entry tagging this completion as
+            // Smartsheet-sourced. set_task_status() logs a generic
+            // status_change entry using the current user; this extra
+            // entry preserves the provenance so admins reviewing the
+            // trail can see the completion came from a pull, not a
+            // manual action.
+            if ( $this->audit ) {
+                $this->audit->log( array(
+                    'session_id'  => $session_id,
+                    'event_type'  => $event_type,
+                    'action'      => 'status_change',
+                    'source'      => 'smartsheet',
+                    'entity_type' => 'task',
+                    'entity_id'   => $task_key,
+                    'field_name'  => 'status',
+                    'old_value'   => $current,
+                    'new_value'   => 'complete',
+                    'meta'        => array(
+                        'trigger'  => 'addon_imported_from_smartsheet',
+                        'meta_key' => $meta_key,
+                    ),
+                ) );
+            }
+        }
+    }
+
+    /**
+     * Clear addon meta + status when a Smartsheet pull returns a blank
+     * cell for an addon field that the portal had latched.
+     *
+     * Scoped carve-out around the empty-protection guard in
+     * compute_pull_diff(). Addon fields are mapped direction='both'
+     * (because the sponsor's form latch pushes them to SS), which means
+     * the default pull path protects them from blank overwrites. For
+     * addons specifically we want SS to be authoritative: a cleared
+     * cell means "no longer latched."
+     *
+     * Reads $diff_result['raw_values'] to see every pull-direction
+     * field with its mapped_value and portal_value, including the ones
+     * that were skipped by empty protection.
+     *
+     * @param int   $session_id
+     * @param array $session      Session row.
+     * @param array $diff_result  Output from compute_pull_diff().
+     * @return void
+     */
+    private function clear_addons_on_blank_pull( $session_id, $session, $diff_result ) {
+        if ( ! $this->dashboard || empty( $diff_result['raw_values'] ) ) {
+            return;
+        }
+
+        $event_type = $session['event_type'] ?? 'satellite';
+        $addons     = $this->config->get_addons( $event_type );
+        if ( empty( $addons ) ) {
+            return;
+        }
+
+        // Build lookup: 'addon_{slug}' meta key → task_key.
+        $meta_key_to_task = array();
+        foreach ( $addons as $addon_slug => $addon ) {
+            if ( ! empty( $addon['task_key'] ) ) {
+                $meta_key_to_task[ 'addon_' . $addon_slug ] = $addon['task_key'];
+            }
+        }
+
+        global $wpdb;
+        $status_table = $wpdb->prefix . 'wssp_task_status';
+        $meta_table   = $wpdb->prefix . 'wssp_session_meta';
+
+        foreach ( $diff_result['raw_values'] as $raw ) {
+            $meta_key = $raw['field'] ?? '';
+            $task_key = $meta_key_to_task[ $meta_key ] ?? null;
+            if ( ! $task_key ) continue;
+
+            $ss_empty       = ( $raw['mapped_value'] === '' || $raw['mapped_value'] === null );
+            $portal_latched = ( $raw['portal_value'] !== '' && $raw['portal_value'] !== null );
+            if ( ! ( $ss_empty && $portal_latched ) ) {
+                continue;
+            }
+
+            // Delete meta row.
+            $wpdb->delete(
+                $meta_table,
+                array( 'session_id' => $session_id, 'meta_key' => $meta_key ),
+                array( '%d', '%s' )
+            );
+
+            // Delete status row (if any).
+            $wpdb->delete(
+                $status_table,
+                array( 'session_id' => $session_id, 'task_key' => $task_key ),
+                array( '%d', '%s' )
+            );
+
+            // Audit entry — deliberately loud so a disappeared addon is
+            // traceable back to the exact Smartsheet pull that cleared it.
+            if ( $this->audit ) {
+                $this->audit->log( array(
+                    'session_id'  => $session_id,
+                    'event_type'  => $event_type,
+                    'action'      => 'status_change',
+                    'source'      => 'smartsheet',
+                    'entity_type' => 'task',
+                    'entity_id'   => $task_key,
+                    'field_name'  => 'status',
+                    'old_value'   => (string) $raw['portal_value'],
+                    'new_value'   => 'not_started',
+                    'meta'        => array(
+                        'trigger'  => 'addon_cleared_by_smartsheet_blank',
+                        'meta_key' => $meta_key,
+                        'ss_title' => $raw['ss_title'] ?? '',
+                    ),
+                ) );
+            }
+
+            $this->dashboard->update_rollup_status( $session_id );
+        }
     }
 
     /**

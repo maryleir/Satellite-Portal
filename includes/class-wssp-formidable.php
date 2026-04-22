@@ -919,6 +919,19 @@ class WSSP_Formidable {
             $session_meta->update( $session_id, $meta_key, $target );
             $changed_meta[] = $meta_key;
 
+            // ─── Bump task to in_progress (if not_started/acknowledged) ───
+            // Matches the behavior of every other form-based task: saving
+            // the form moves the task out of "not started" and into
+            // "in progress", but the sponsor still clicks the checkbox
+            // to complete. Never downgrades a terminal status.
+            if ( $this->dashboard && ! empty( $addon['task_key'] ) ) {
+                $task_key = $addon['task_key'];
+                $cur_status = $this->dashboard->get_task_status( $session_id, $task_key );
+                if ( in_array( $cur_status, array( 'not_started', 'acknowledged' ), true ) ) {
+                    $this->dashboard->set_task_status( $session_id, $task_key, 'in_progress' );
+                }
+            }
+
             if ( $this->audit ) {
                 $this->audit->log( array(
                     'session_id'  => $session_id,

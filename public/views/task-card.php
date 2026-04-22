@@ -38,14 +38,24 @@ if ( $subtitle_html ) {
     $subtitle_html = do_shortcode( $subtitle_html );
 }
 
-// Add-on state: if this task is an add-on (slug ends in -addon) and the
-// sponsor has responded (either requested or declined), treat the task as done.
-$is_addon        = (bool) preg_match( '/-addon$/', $task_key );
-$addon_slug      = $is_addon ? str_replace( '-', '_', preg_replace( '/-addon$/', '', $task_key ) ) : '';
-$addon_state     = $is_addon && isset( $addon_states ) ? ( $addon_states[ $addon_slug ] ?? 'available' ) : 'available';
-$addon_responded = $is_addon && in_array( $addon_state, array( 'active', 'declined' ), true );
-if ( $addon_responded ) {
-    $is_done = true;
+// Addon identity (still used by the form-completion gate and admin
+// reactivate affordance below). Done-state for addons now follows the
+// standard rule: status row only, no derived override. See
+// sync_addon_task_statuses (SS import path) and
+// apply_addon_request_triggers (form latch path) for how status is written.
+$is_addon   = (bool) preg_match( '/-addon$/', $task_key );
+$addon_slug = $is_addon ? str_replace( '-', '_', preg_replace( '/-addon$/', '', $task_key ) ) : '';
+
+// SS-imported addon: task was auto-completed by the Smartsheet pull
+// (submitted_by = 0 marker) with no sponsor form interaction. The
+// Formidable entry is empty in this case, so opening "View Response"
+// would just show blank checkboxes and confuse the sponsor. Detect this
+// here so the render block below can show a contextual label instead.
+$is_ss_imported_addon = false;
+if ( $is_addon && $is_done && isset( $task_statuses[ $task_key ] ) ) {
+    $status_row = $task_statuses[ $task_key ];
+    $submitted_by = isset( $status_row['submitted_by'] ) ? (int) $status_row['submitted_by'] : -1;
+    $is_ss_imported_addon = ( $submitted_by === 0 );
 }
 
 // Upload task state: detect file type and current file status
@@ -93,7 +103,7 @@ $needs_ack       = $has_review && ! $is_acknowledged && ! $is_done;
 // should be disabled until the sponsor has filled in at least one field.
 // Upload tasks are excluded — they use the file upload system, not Formidable forms.
 $form_incomplete = false;
-if ( $form_key && ! $is_upload && ! empty( $task['field_keys'] ) && is_array( $task['field_keys'] ) && ! $is_done && ! $is_addon ) {
+if ( $form_key && ! $is_upload && ! empty( $task['field_keys'] ) && is_array( $task['field_keys'] ) && ! $is_done ) {
     $form_incomplete = true;
     if ( isset( $session_data ) && is_array( $session_data ) ) {
         foreach ( $task['field_keys'] as $fk ) {
@@ -342,23 +352,36 @@ if ( $is_done ) {
                     </button>
                 <?php endif; ?>
             <?php elseif ( $form_key && ! $is_info && $is_done ) : ?>
-                <!-- Completed task: view-only access to submitted responses -->
-                <button class="wssp-btn wssp-btn--info wssp-open-form-drawer"
-                        data-form-key="<?php echo esc_attr( $form_key ); ?>"
-                        data-task-key="<?php echo esc_attr( $task_key ); ?>"
-                        data-task-label="<?php echo esc_attr( $task['label'] ); ?>"
-                        data-field-keys="<?php echo esc_attr( $field_keys ); ?>"  
-                        data-session-id="<?php echo esc_attr( $session_id ); ?>"
-                        data-readonly="true"
-                        <?php if ( $subtitle_html ) : ?>
-                            data-subtitle-html="<?php echo esc_attr( $subtitle_html ); ?>"
-                        <?php endif; ?>>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                        <circle cx="12" cy="12" r="3"/>
-                    </svg>
-                    View Response
-                </button>
+                <?php if ( $is_ss_imported_addon ) : ?>
+                    <!-- SS-imported addon: no form response to show.
+                         Display a static status label instead of opening the
+                         empty Formidable entry. -->
+                    <span class="wssp-ss-imported-note">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        Purchased on application
+                    </span>
+                <?php else : ?>
+                    <!-- Completed task: view-only access to submitted responses -->
+                    <button class="wssp-btn wssp-btn--info wssp-open-form-drawer"
+                            data-form-key="<?php echo esc_attr( $form_key ); ?>"
+                            data-task-key="<?php echo esc_attr( $task_key ); ?>"
+                            data-task-label="<?php echo esc_attr( $task['label'] ); ?>"
+                            data-field-keys="<?php echo esc_attr( $field_keys ); ?>"  
+                            data-session-id="<?php echo esc_attr( $session_id ); ?>"
+                            data-readonly="true"
+                            <?php if ( $subtitle_html ) : ?>
+                                data-subtitle-html="<?php echo esc_attr( $subtitle_html ); ?>"
+                            <?php endif; ?>>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                        View Response
+                    </button>
+                <?php endif; ?>
             <?php elseif ( $form_key && ! $is_info && ! $is_done ) : ?>
                 <!-- Active task: editable form -->
                 <button class="wssp-btn wssp-btn--form wssp-open-form-drawer"

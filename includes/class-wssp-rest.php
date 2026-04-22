@@ -285,11 +285,19 @@ class WSSP_REST {
      * ─────────────────────────────────────────── */
 
     /**
-     * Reactivate a completed task by deleting its status row.
+     * Reactivate a completed task.
      *
-     * Admin-only action.  Deletes the task_status row, returning the
-     * task to "not started" (no row = not started).  Also recalculates
-     * the session rollup.
+     * Admin-only action. Only valid from a terminal status (complete /
+     * approved / submitted_by_sponsor) — returns 400 otherwise.
+     *
+     * Behavior depends on who completed the task:
+     *   - submitted_by = 0 (system, e.g. Smartsheet-imported addons) →
+     *     delete the row. Task returns to not_started. No prior sponsor
+     *     work to preserve.
+     *   - submitted_by = real user ID (sponsor completed) → update the
+     *     row to in_progress and null out submitted_at / submitted_by.
+     *     Preserves the sponsor's prior progress so the task reappears
+     *     in "in progress" rather than "get started" buckets.
      *
      * @param WP_REST_Request $request
      * @return WP_REST_Response
@@ -311,24 +319,53 @@ class WSSP_REST {
 
         $event_type = $session['event_type'] ?? 'satellite';
 
-        // Get current status for the audit log before deleting
+        // Get current status row — we need both `status` and `submitted_by`
+        // to decide whether to delete or downgrade to in_progress.
         global $wpdb;
-        $table      = $wpdb->prefix . 'wssp_task_status';
-        $old_status = $wpdb->get_var( $wpdb->prepare(
-            "SELECT status FROM {$table} WHERE session_id = %d AND task_key = %s",
+        $table = $wpdb->prefix . 'wssp_task_status';
+        $row = $wpdb->get_row( $wpdb->prepare(
+            "SELECT status, submitted_by FROM {$table} WHERE session_id = %d AND task_key = %s",
             $session_id, $task_key
-        ));
+        ), ARRAY_A );
 
-        if ( ! $old_status ) {
+        if ( ! $row ) {
             return new WP_REST_Response( array( 'success' => false, 'message' => 'Task has no status to reactivate.' ), 400 );
         }
 
-        // Delete the status row — task returns to "not started"
-        $wpdb->delete(
-            $table,
-            array( 'session_id' => $session_id, 'task_key' => $task_key ),
-            array( '%d', '%s' )
-        );
+        $old_status = $row['status'];
+
+        // Only allow reactivation from a terminal status. A task that's
+        // in_progress or not_started is not a completion that can be
+        // reversed — fail loudly rather than silently deleting the row.
+        if ( ! in_array( $old_status, array( 'complete', 'approved', 'submitted_by_sponsor' ), true ) ) {
+            return new WP_REST_Response( array(
+                'success' => false,
+                'message' => sprintf( 'Cannot reactivate a task in status "%s". Reactivate is only valid for completed tasks.', $old_status ),
+            ), 400 );
+        }
+
+        // System-completed (submitted_by=0) vs sponsor-completed determines
+        // the target. Sponsor work is preserved as in_progress.
+        $was_system_completed = ( (int) $row['submitted_by'] ) === 0;
+        $new_status = $was_system_completed ? 'not_started' : 'in_progress';
+
+        if ( $was_system_completed ) {
+            $wpdb->delete(
+                $table,
+                array( 'session_id' => $session_id, 'task_key' => $task_key ),
+                array( '%d', '%s' )
+            );
+        } else {
+            // Downgrade to in_progress; null out submission metadata so
+            // a future completion records the new submitter cleanly.
+            $wpdb->update(
+                $table,
+                array( 'status' => 'in_progress', 'submitted_at' => null, 'submitted_by' => null ),
+                array( 'session_id' => $session_id, 'task_key' => $task_key ),
+                array( '%s', '%s', '%d' ),
+                array( '%d', '%s' )
+            );
+        }
 
         // Recalculate session rollup
         $dashboard = new WSSP_Dashboard( $this->config, $this->access, $this->audit );
@@ -343,12 +380,16 @@ class WSSP_REST {
             'entity_id'   => $task_key,
             'user_id'     => $user_id,
             'old_value'   => $old_status,
-            'new_value'   => 'not_started',
+            'new_value'   => $new_status,
+            'meta'        => array(
+                'trigger'              => 'admin_reactivate',
+                'was_system_completed' => $was_system_completed,
+            ),
         ));
 
         return new WP_REST_Response( array(
             'success' => true,
-            'status'  => 'not_started',
+            'status'  => $new_status,
         ), 200 );
     }
 
@@ -551,14 +592,11 @@ class WSSP_REST {
 
                 $total_actionable++;
 
+                // Done-state follows the standard rule: status row only.
+                // Addon status is written by sync_addon_task_statuses
+                // (SS import path) or apply_addon_request_triggers
+                // (sponsor form latch path).
                 $t_done = ! empty( $t['is_done'] ) || ! empty( $t['is_submitted'] );
-                if ( ! $t_done && preg_match( '/-addon$/', $t['key'] ) ) {
-                    $t_addon_slug  = str_replace( '-', '_', preg_replace( '/-addon$/', '', $t['key'] ) );
-                    $t_addon_state = $addon_states[ $t_addon_slug ] ?? 'available';
-                    if ( in_array( $t_addon_state, array( 'active', 'declined' ), true ) ) {
-                        $t_done = true;
-                    }
-                }
 
                 if ( $t_done ) $total_done++;
             }

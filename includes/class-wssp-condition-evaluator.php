@@ -165,7 +165,7 @@ class WSSP_Condition_Evaluator {
              * OR requested via the form field.
              */
             'door_drop_addon' => function ( $session_data ) {
-                if ( self::is_addon_active( $session_data, 'door_drop' ) ) {
+                if ( self::is_addon_active( $session_data, 'hotel_door_drop' ) ) {
                     return true;
                 }
                 return self::is_addon_requested( $session_data, 'wssp_request_door_drop' );
@@ -177,7 +177,7 @@ class WSSP_Condition_Evaluator {
              * OR requested via the form field.
              */
             'program_ad_addon' => function ( $session_data ) {
-                if ( self::is_addon_active( $session_data, 'program_ad' ) ) {
+                if ( self::is_addon_active( $session_data, 'program_advertisement' ) ) {
                     return true;
                 }
                 return self::is_addon_requested( $session_data, 'wssp_request_program_ad' );
