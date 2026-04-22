@@ -34,6 +34,27 @@ class WSSP_Formidable {
     const FIELD_SESSION_KEY = 'wssp_session_key';
 
     /**
+     * Contacts-for-Logistics repeater — field keys and derived portal keys.
+     *
+     * The repeater stores rows as child entries. The parent entry's meta
+     * for REPEATER_FIELD_KEY is a comma-separated list of child entry IDs,
+     * so it changes when rows are added/removed. In-place edits to an
+     * existing row (e.g. fixing a typo in an email) DO NOT change that
+     * parent meta value; we detect those by snapshotting the concatenated
+     * child values before/after the save.
+     *
+     * CONTACTS_PORTAL_KEY and EMAILS_PORTAL_KEY are derived values — the
+     * concatenation of all child names and emails respectively. They
+     * correspond to the two Smartsheet columns in smartsheet-field-map.php
+     * and are only resolvable via this class.
+     */
+    const CONTACTS_REPEATER_FIELD_KEY = 'wssp_data_logistics_contact_repeater';
+    const CONTACTS_NAME_FIELD_KEY     = 'wssp_data_logistics_contact_name';
+    const CONTACTS_EMAIL_FIELD_KEY    = 'wssp_data_logistics_contact_email';
+    const CONTACTS_PORTAL_KEY         = 'contacts_for_logistics';
+    const EMAILS_PORTAL_KEY           = 'emails_for_logistics';
+
+    /**
      * Form ID cache (populated on first use for performance)
      *
      * @var array
@@ -67,6 +88,13 @@ class WSSP_Formidable {
      * @var WSSP_Smartsheet|null
      */
     private $smartsheet;
+    
+    /**
+     * Notifier for outbound change-notification emails.
+     *
+     * @var WSSP_Notifier|null
+     */
+    private $notifier;
 
     /**
      * Pre-update entry snapshot for diffing.
@@ -77,6 +105,18 @@ class WSSP_Formidable {
      * @var array  Keyed by entry_id => [ field_key => value ].
      */
     private $pre_update_snapshots = array();
+
+    /**
+     * Pre-update snapshot of the contacts-repeater derived values.
+     *
+     * Required because the parent entry's diff can't see in-place edits
+     * to repeater child rows (only add/remove changes the parent's
+     * repeater meta value). We snapshot the concatenated names/emails
+     * before the save and compare after.
+     *
+     * @var array  Keyed by entry_id => [ 'contacts' => string, 'emails' => string ]
+     */
+    private $pre_update_contacts_snapshots = array();
 
     /**
      * Per-entry stash of "what changed in this save" so that the
@@ -110,13 +150,21 @@ class WSSP_Formidable {
      * @param WSSP_Dashboard|null   $dashboard  Dashboard (needed for task status writes).
      * @param WSSP_Smartsheet|null  $smartsheet Smartsheet sync (for auto-push after form save).
      */
-    public function __construct( ?WSSP_Audit_Log $audit = null, ?WSSP_Config $config = null, ?WSSP_Dashboard $dashboard = null, ?WSSP_Smartsheet $smartsheet = null ) {
+    public function __construct(
+        ?WSSP_Audit_Log  $audit      = null,
+        ?WSSP_Config     $config     = null,
+        ?WSSP_Dashboard  $dashboard  = null,
+        ?WSSP_Smartsheet $smartsheet = null,
+        ?WSSP_Notifier   $notifier   = null
+    ) {
         $this->audit      = $audit;
         $this->config     = $config;
         $this->dashboard  = $dashboard;
         $this->smartsheet = $smartsheet;
+        $this->notifier   = $notifier;
         $this->init_hooks();
     }
+
 
     /**
      * Register hooks for Formidable integration
@@ -204,7 +252,7 @@ class WSSP_Formidable {
             return null;
         }
 
-        $form = FrmForm::getOne( array( 'form_key' => $form_key ) );
+        $form    = FrmForm::getOne( $form_key );
         $form_id = $form ? (int) $form->id : null;
 
         $this->form_ids[ $form_key ] = $form_id;
@@ -296,6 +344,12 @@ class WSSP_Formidable {
         // Use get_entry_data() to read current values before the save.
         $this->pre_update_snapshots[ $entry_id ] = $this->get_entry_data( $entry_id );
 
+        // Also snapshot the contacts-repeater derived values. The parent
+        // entry's diff can't see in-place edits to existing child rows —
+        // only add/remove changes the parent's repeater meta. Comparing
+        // before/after concatenated strings catches every case.
+        $this->pre_update_contacts_snapshots[ $entry_id ] = $this->get_contacts_snapshot( $entry_id );
+
         return $values;
     }
 
@@ -365,6 +419,19 @@ class WSSP_Formidable {
             }
         }
 
+        // ─── Contacts-for-Logistics derived keys ───
+        // On create, a non-empty contacts snapshot means these derived
+        // portal keys should be pushed to Smartsheet. (On update, the
+        // same logic lives in audit_log_form_update as a before/after
+        // diff.)
+        $contacts_snapshot = $this->get_contacts_snapshot( $entry_id );
+        if ( ! empty( $contacts_snapshot['contacts'] ) && ! in_array( self::CONTACTS_PORTAL_KEY, $filled_fields, true ) ) {
+            $filled_fields[] = self::CONTACTS_PORTAL_KEY;
+        }
+        if ( ! empty( $contacts_snapshot['emails'] ) && ! in_array( self::EMAILS_PORTAL_KEY, $filled_fields, true ) ) {
+            $filled_fields[] = self::EMAILS_PORTAL_KEY;
+        }
+
         // Stash for maybe_push_to_smartsheet (priority 50).
         $this->save_change_stash[ $entry_id ] = array(
             'changed_field_keys' => $filled_fields,
@@ -411,7 +478,10 @@ class WSSP_Formidable {
 
         $session_id = (int) $session['id'];
         $event_type = $session['event_type'] ?? 'satellite';
-        $changes    = array();
+                
+        // Collect change details for the notifier while we log to the audit table.
+        $change_details = array();
+        $changes        = array(); 
 
         foreach ( $all_keys as $field_key ) {
             // Skip internal plumbing fields.
@@ -443,7 +513,81 @@ class WSSP_Formidable {
                 'new_value'   => $new_cmp,
                 'meta'        => array( 'entry_id' => $entry_id ),
             ) );
+
+            // Collect for notifier.
+            $change_details[] = array(
+                'field_key'  => $field_key,
+                'field_name' => $this->resolve_field_display_name( $field_key ),
+                'old'        => $old_cmp,
+                'new'        => $new_cmp,
+            );
         }
+
+        // ─── Contacts-for-Logistics derived change detection ───
+        // The parent entry's diff doesn't see in-place edits to repeater
+        // child rows. Compare the pre- and post-save concatenated strings
+        // of the contacts repeater; if either changed, inject the two
+        // derived portal keys into $changes so Smartsheet auto-push picks
+        // them up, and audit-log each as its own field_edit row.
+        $contacts_before = $this->pre_update_contacts_snapshots[ $entry_id ] ?? array( 'contacts' => '', 'emails' => '' );
+        unset( $this->pre_update_contacts_snapshots[ $entry_id ] );
+        $contacts_after  = $this->get_contacts_snapshot( $entry_id );
+
+        $derived_pairs = array(
+            self::CONTACTS_PORTAL_KEY => array(
+                'before' => $contacts_before['contacts'] ?? '',
+                'after'  => $contacts_after['contacts'] ?? '',
+                'label'  => 'Contacts for Logistics',
+            ),
+            self::EMAILS_PORTAL_KEY => array(
+                'before' => $contacts_before['emails'] ?? '',
+                'after'  => $contacts_after['emails'] ?? '',
+                'label'  => 'Emails for Logistics',
+            ),
+        );
+
+        foreach ( $derived_pairs as $portal_key => $pair ) {
+            if ( $pair['before'] === $pair['after'] ) {
+                continue;
+            }
+            if ( in_array( $portal_key, $changes, true ) ) {
+                continue; // Already captured by the regular diff (unlikely but safe).
+            }
+
+            $changes[] = $portal_key;
+
+            $this->audit->log( array(
+                'session_id'  => $session_id,
+                'event_type'  => $event_type,
+                'action'      => 'field_edit',
+                'entity_type' => 'form',
+                'entity_id'   => self::FORM_SATELLITE_SESSION_DATA,
+                'field_name'  => $portal_key,
+                'old_value'   => $pair['before'],
+                'new_value'   => $pair['after'],
+                'meta'        => array( 'entry_id' => $entry_id, 'derived' => true ),
+            ) );
+
+            $change_details[] = array(
+                'field_key'  => $portal_key,
+                'field_name' => $pair['label'],
+                'old'        => $pair['before'],
+                'new'        => $pair['after'],
+            );
+        }
+
+        // Fire the notification once, with the full change list.
+        if ( $this->notifier && ! empty( $change_details ) ) {
+            // Hydrate session with the extra fields the email template needs.
+            $full_session = $this->hydrate_session_for_notifier( $session );
+            $this->notifier->notify_form_changes(
+                $full_session,
+                $change_details,
+                get_current_user_id(),
+                $entry_id
+            );
+        }
+
 
         // If nothing actually changed (e.g. sponsor re-saved without edits),
         // don't log anything — keep the audit log free of noise.
@@ -498,6 +642,40 @@ class WSSP_Formidable {
             "SELECT id, event_type, session_key FROM {$wpdb->prefix}wssp_sessions WHERE session_key = %s",
             $session_key
         ), ARRAY_A );
+    }
+    
+    /**
+     * Resolve a Formidable field_key to its human-readable field name.
+     *
+     * Falls back to the key itself if the lookup fails.
+     */
+    private function resolve_field_display_name( $field_key ) {
+        if ( ! class_exists( 'FrmField' ) ) {
+            return $field_key;
+        }
+        $field_id = FrmField::get_id_by_key( $field_key );
+        if ( ! $field_id ) {
+            return $field_key;
+        }
+        $field = FrmField::getOne( $field_id );
+        return ( $field && ! empty( $field->name ) ) ? $field->name : $field_key;
+    }
+
+    /**
+     * Load the extra session columns (session_code, short_name) that
+     * resolve_session_for_entry() omits for performance.
+     */
+    private function hydrate_session_for_notifier( $session ) {
+        if ( empty( $session['id'] ) ) {
+            return $session;
+        }
+        global $wpdb;
+        $row = $wpdb->get_row( $wpdb->prepare(
+            "SELECT id, session_key, event_type, session_code, short_name
+             FROM {$wpdb->prefix}wssp_sessions WHERE id = %d",
+            (int) $session['id']
+        ), ARRAY_A );
+        return $row ?: $session;
     }
 
     /**
@@ -909,6 +1087,103 @@ class WSSP_Formidable {
         }
 
         return $data;
+    }
+
+    /**
+     * Build the current Contacts-for-Logistics snapshot for a parent entry.
+     *
+     * Walks the repeater's child entries, reads the name and email from each
+     * row, and returns a pair of comma-joined strings suitable both for
+     * Smartsheet cell values and for before/after change detection.
+     *
+     * Rows are ordered by child entry ID (stable, creation order) so the
+     * output is deterministic across repeated calls — essential for the
+     * string-compare diff in audit_log_form_update().
+     *
+     * Rows with an empty email are excluded from the emails string;
+     * rows with an empty name are excluded from the contacts string.
+     * A row with both blank contributes nothing.
+     *
+     * @param int $parent_entry_id
+     * @return array{contacts:string, emails:string}
+     */
+    public function get_contacts_snapshot( $parent_entry_id ) {
+        $empty = array( 'contacts' => '', 'emails' => '' );
+
+        if ( empty( $parent_entry_id ) || ! class_exists( 'FrmField' ) || ! class_exists( 'FrmEntryMeta' ) ) {
+            return $empty;
+        }
+
+        $name_field_id  = FrmField::get_id_by_key( self::CONTACTS_NAME_FIELD_KEY );
+        $email_field_id = FrmField::get_id_by_key( self::CONTACTS_EMAIL_FIELD_KEY );
+        if ( ! $name_field_id || ! $email_field_id ) {
+            return $empty;
+        }
+
+        $child_ids = $this->get_contacts_child_entry_ids( $parent_entry_id );
+        if ( empty( $child_ids ) ) {
+            return $empty;
+        }
+
+        $names  = array();
+        $emails = array();
+        foreach ( $child_ids as $child_id ) {
+            $name  = trim( (string) FrmEntryMeta::get_entry_meta_by_field( $child_id, $name_field_id, true ) );
+            $email = trim( (string) FrmEntryMeta::get_entry_meta_by_field( $child_id, $email_field_id, true ) );
+
+            if ( $name !== '' ) {
+                $names[] = $name;
+            }
+            if ( $email !== '' ) {
+                $emails[] = $email;
+            }
+        }
+
+        return array(
+            'contacts' => implode( ', ', $names ),
+            'emails'   => implode( ', ', $emails ),
+        );
+    }
+
+    /**
+     * Return the ordered list of child entry IDs for the contacts repeater
+     * on a given parent entry.
+     *
+     * Prefers the repeater field's own stored value (comma-separated child
+     * entry IDs — preserves the order the sponsor sees in the UI). Falls
+     * back to a parent_item_id query if the meta value is unreadable.
+     *
+     * @param int $parent_entry_id
+     * @return int[]
+     */
+    private function get_contacts_child_entry_ids( $parent_entry_id ) {
+        if ( ! class_exists( 'FrmField' ) || ! class_exists( 'FrmEntryMeta' ) ) {
+            return array();
+        }
+
+        $repeater_field_id = FrmField::get_id_by_key( self::CONTACTS_REPEATER_FIELD_KEY );
+        if ( ! $repeater_field_id ) {
+            return array();
+        }
+
+        // Strategy 1: the repeater field's own stored value on the parent.
+        $raw = FrmEntryMeta::get_entry_meta_by_field( $parent_entry_id, $repeater_field_id, true );
+        if ( ! empty( $raw ) ) {
+            $ids = is_array( $raw ) ? $raw : array_map( 'trim', explode( ',', (string) $raw ) );
+            $ids = array_values( array_filter( array_map( 'intval', $ids ) ) );
+            if ( ! empty( $ids ) ) {
+                return $ids;
+            }
+        }
+
+        // Strategy 2: child items by parent_item_id.
+        global $wpdb;
+        $rows = $wpdb->get_col( $wpdb->prepare(
+            "SELECT id FROM {$wpdb->prefix}frm_items WHERE parent_item_id = %d ORDER BY id ASC",
+            $parent_entry_id
+        ) );
+
+        return array_map( 'intval', $rows ?: array() );
     }
 
     /**

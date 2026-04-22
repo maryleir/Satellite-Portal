@@ -173,9 +173,14 @@ class WSSP_Session_Access {
      * @param int    $user_id    WordPress user ID.
      * @param string $role       Role slug.
      * @param int    $added_by   Who is adding this link.
+     * @param string $source     Where the link originated. Defaults to 'admin'
+     *                           (preserving legacy callers). Automated syncs
+     *                           should pass their own source slug (e.g.
+     *                           'contacts_repeater') so reconciliation can
+     *                           distinguish their rows from admin-created ones.
      * @return int|false Insert ID or false on failure.
      */
-    public function link_user( $session_id, $user_id, $role, $added_by = 0 ) {
+    public function link_user( $session_id, $user_id, $role, $added_by = 0, $source = 'admin' ) {
         global $wpdb;
 
         // Prevent duplicate links with the same role
@@ -191,10 +196,58 @@ class WSSP_Session_Access {
             'session_id' => $session_id,
             'user_id'    => $user_id,
             'role'       => $role,
+            'source'     => $source,
             'added_by'   => $added_by ?: get_current_user_id(),
-        ), array( '%d', '%d', '%s', '%d' ) );
+        ), array( '%d', '%d', '%s', '%s', '%d' ) );
 
         return $result ? $wpdb->insert_id : false;
+    }
+
+    /**
+     * Get user IDs linked to a session via a specific source.
+     *
+     * Used by automated syncs to reconcile their own rows without
+     * touching links created by other sources (e.g. admin-linked users).
+     *
+     * @param int    $session_id WSSP session ID.
+     * @param string $source     Source slug.
+     * @return int[] User IDs.
+     */
+    public function get_session_user_ids_by_source( $session_id, $source ) {
+        global $wpdb;
+
+        $rows = $wpdb->get_col( $wpdb->prepare(
+            "SELECT user_id FROM {$this->table} WHERE session_id = %d AND source = %s",
+            $session_id,
+            $source
+        ));
+
+        return array_map( 'intval', $rows );
+    }
+
+    /**
+     * Remove a user from a session, scoped to a specific source.
+     *
+     * Syncs use this to delete their own rows without risk of
+     * removing admin-created links for the same user.
+     *
+     * @param int    $session_id WSSP session ID.
+     * @param int    $user_id    WordPress user ID.
+     * @param string $source     Source slug.
+     * @return int Number of rows deleted.
+     */
+    public function unlink_user_by_source( $session_id, $user_id, $source ) {
+        global $wpdb;
+
+        return (int) $wpdb->delete(
+            $this->table,
+            array(
+                'session_id' => $session_id,
+                'user_id'    => $user_id,
+                'source'     => $source,
+            ),
+            array( '%d', '%d', '%s' )
+        );
     }
 
     /**

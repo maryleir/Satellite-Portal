@@ -50,17 +50,22 @@ class WSSP_Activator {
         dbDelta( $sql_sessions );
 
         /* 2. Session ↔ User links ─────────────── */
+        // `source` records where a link came from so automated syncs
+        // (e.g. the Contacts-for-Logistics repeater) only reconcile
+        // their own rows and never touch admin-created links.
         $sql_session_users = "CREATE TABLE {$prefix}wssp_session_users (
             id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
             session_id bigint(20) unsigned NOT NULL,
             user_id bigint(20) unsigned NOT NULL,
             role varchar(30) NOT NULL DEFAULT 'sponsor_primary',
+            source varchar(32) NOT NULL DEFAULT 'admin',
             added_by bigint(20) unsigned DEFAULT NULL,
             created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             UNIQUE KEY session_user_role (session_id, user_id, role),
             KEY user_id (user_id),
-            KEY session_id (session_id)
+            KEY session_id (session_id),
+            KEY source (source)
         ) $charset;";
         dbDelta( $sql_session_users );
 

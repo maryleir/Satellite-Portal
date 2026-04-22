@@ -30,6 +30,17 @@ class WSSP_Smartsheet {
     /** @var WSSP_Audit_Log|null */
     private $audit;
 
+    /**
+     * Formidable service — set post-construction because WSSP_Formidable
+     * depends on WSSP_Smartsheet via its own constructor. Used by the
+     * auto-push path to resolve derived portal keys (e.g. the concatenated
+     * Contacts-for-Logistics values) that live in repeater child entries
+     * and can't be read via FrmField::get_id_by_key().
+     *
+     * @var WSSP_Formidable|null
+     */
+    private $formidable;
+
     /** @var string API base URL. */
     private $api_base = 'https://api.smartsheet.com/2.0';
 
@@ -45,6 +56,16 @@ class WSSP_Smartsheet {
         $this->audit        = $audit;
         $this->api_token    = defined( 'WSSP_SMARTSHEET_TOKEN' ) ? WSSP_SMARTSHEET_TOKEN : '';
         $this->field_map    = $this->config->get_smartsheet_map();
+    }
+
+    /**
+     * Inject the Formidable service. Called from the bootstrap after
+     * both Smartsheet and Formidable have been instantiated.
+     *
+     * @param WSSP_Formidable $formidable
+     */
+    public function set_formidable( WSSP_Formidable $formidable ) {
+        $this->formidable = $formidable;
     }
 
     /* ───────────────────────────────────────────
@@ -569,7 +590,20 @@ class WSSP_Smartsheet {
 
             if ( $direction === 'push' && $store === 'formidable' ) {
                 if ( empty( $changed_field_set[ $portal_key ] ) ) continue;
-                $value  = $this->get_formidable_value( $session, $portal_key );
+
+                // Derived portal keys (concatenations of repeater child rows)
+                // can't be read via FrmField::get_id_by_key() because they're
+                // not Formidable fields — they're composite values we build
+                // by walking child entries. Route them through the Formidable
+                // service's snapshot helper.
+                if ( $this->formidable && in_array( $portal_key, array(
+                    WSSP_Formidable::CONTACTS_PORTAL_KEY,
+                    WSSP_Formidable::EMAILS_PORTAL_KEY,
+                ), true ) ) {
+                    $value = $this->resolve_contacts_derived_value( $session, $portal_key );
+                } else {
+                    $value = $this->get_formidable_value( $session, $portal_key );
+                }
                 $reason = 'changed_by_sponsor';
             } elseif ( $store === 'meta' ) {
                 // Both 'push' + meta and 'both' + meta are gated by changed_meta_keys.
@@ -1176,6 +1210,38 @@ class WSSP_Smartsheet {
         // Anything else — ambiguous; default to false for safety.
         // (Better to leave an SS checkbox unchecked than to check it in error.)
         return false;
+    }
+
+    /**
+     * Resolve a derived contacts portal_key to a cell value.
+     *
+     * Looks up the session's Formidable parent entry, asks the Formidable
+     * service for the concatenated names/emails of the repeater rows,
+     * and returns the slice matching the requested portal_key.
+     *
+     * @param array  $session     Row from wp_wssp_sessions.
+     * @param string $portal_key  Either CONTACTS_PORTAL_KEY or EMAILS_PORTAL_KEY.
+     * @return string Comma-joined string (may be empty).
+     */
+    private function resolve_contacts_derived_value( $session, $portal_key ) {
+        if ( ! $this->formidable ) {
+            return '';
+        }
+
+        $entry_id = (int) ( $session['frm_entry_id'] ?? 0 );
+        if ( ! $entry_id ) {
+            return '';
+        }
+
+        $snapshot = $this->formidable->get_contacts_snapshot( $entry_id );
+
+        if ( $portal_key === WSSP_Formidable::CONTACTS_PORTAL_KEY ) {
+            return $snapshot['contacts'] ?? '';
+        }
+        if ( $portal_key === WSSP_Formidable::EMAILS_PORTAL_KEY ) {
+            return $snapshot['emails'] ?? '';
+        }
+        return '';
     }
 
     /**

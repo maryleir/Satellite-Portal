@@ -112,10 +112,16 @@ add_action( 'plugins_loaded', function () {
 
 
 
-    // Core services
+// Core services
     $config       = new WSSP_Config();
     $access       = new WSSP_Session_Access();
     $audit        = new WSSP_Audit_Log();
+
+    // Notifier + logger (must come after $audit, before anything that logs).
+    $notifier     = new WSSP_Notifier();
+    $logger       = new WSSP_Logger( $audit, $notifier );
+    $logger->register();   // Install PHP error handlers
+
     $loader       = new WSSP_Loader( $config, $access, $audit );
     $dashboard    = new WSSP_Dashboard( $config, $access, $audit );
     $task_content = new WSSP_Task_Content( $config );
@@ -126,7 +132,22 @@ add_action( 'plugins_loaded', function () {
 
     // Formidable service — always instantiated early because it registers hooks
     // Receives $smartsheet so it can auto-push form values to the master sheet.
-    $formidable   = new WSSP_Formidable( $audit, $config, $dashboard, $smartsheet );
+    // $notifier is passed so it can send change-notification emails.
+    $formidable   = new WSSP_Formidable( $audit, $config, $dashboard, $smartsheet, $notifier );
+
+    // Back-reference: Smartsheet needs the Formidable service to resolve
+    // derived portal keys (e.g. the Contacts-for-Logistics concatenations,
+    // which live in repeater child entries and can't be looked up as
+    // Formidable field_keys). Done as a setter because WSSP_Formidable
+    // already depends on WSSP_Smartsheet in its constructor.
+    $smartsheet->set_formidable( $formidable );
+
+    // Contacts-for-Logistics → session access sync.
+    // Must come after $formidable so its hooks are registered in the
+    // right order; the sync hooks in at priority 37, after Formidable's
+    // session linkage (30) and audit logging (35).
+    new WSSP_Contacts_Sync( $access, $formidable, $audit );
+    
     new WSSP_REST_Meeting_Planners( $access );
 
 
@@ -135,7 +156,9 @@ add_action( 'plugins_loaded', function () {
     if ( is_admin() ) {
         new WSSP_Admin( $config, $access, $audit, $session_meta, $smartsheet, $formidable, $dates_smartsheet );
         new WSSP_Reports( $config, $audit, $session_meta, $formidable );
+        new WSSP_Notification_Settings(); 
     }
+
 
     // Public-facing — pass $formidable so session-overview.php, task surfacing, progress tracking, etc. can merge data cleanly
     new WSSP_Public( $config, $access, $dashboard, $task_content, $session_meta, $formidable );
