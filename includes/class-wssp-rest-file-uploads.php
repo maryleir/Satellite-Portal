@@ -71,7 +71,7 @@ class WSSP_REST_File_Uploads {
         'wssp_comment_type',
     );
 
-    public function __construct( WSSP_Session_Access $access, WSSP_Config $config, WSSP_Audit_Log $audit, WSSP_Notifier $notifier = null ) {
+    public function __construct( WSSP_Session_Access $access, WSSP_Config $config, WSSP_Audit_Log $audit, ?WSSP_Notifier $notifier = null ) {
         $this->access   = $access;
         $this->config   = $config;
         $this->audit    = $audit;

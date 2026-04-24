@@ -74,7 +74,25 @@ class WSSP_Public {
         wp_enqueue_style( 'wssp-meeting-planners', WSSP_PLUGIN_URL . 'public/css/meeting-planners.css', array( 'wssp-portal' ), WSSP_VERSION );
         wp_enqueue_style( 'wssp-file-upload', WSSP_PLUGIN_URL . 'public/css/file-upload.css', array( 'wssp-portal' ), WSSP_VERSION );
 
-        wp_enqueue_script( 'wssp-form-drawer', WSSP_PLUGIN_URL . 'public/js/form-drawer.js', array( 'wssp-portal' ), WSSP_VERSION, true );
+        // Shared file-panel module — handles upload / status / comments
+        // inside any container. The drawer delegates to it, and the admin
+        // File Review Queue uses the same module. Enqueue BEFORE
+        // form-drawer so the drawer can reference window.WSSPFilePanel.
+        wp_enqueue_script(
+            'wssp-file-panel',
+            WSSP_PLUGIN_URL . 'public/js/wssp-file-panel.js',
+            array( 'wssp-portal' ),
+            WSSP_VERSION,
+            true
+        );
+
+        wp_enqueue_script(
+            'wssp-form-drawer',
+            WSSP_PLUGIN_URL . 'public/js/form-drawer.js',
+            array( 'wssp-portal', 'wssp-file-panel' ),
+            WSSP_VERSION,
+            true
+        );
     }
 
     /*

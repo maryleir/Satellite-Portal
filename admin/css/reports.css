@@ -904,3 +904,57 @@
         width: 100%;
     }
 }
+
+/* ─── File download link in the version column ─── */
+.wssp-frq__file-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    text-decoration: none;
+    color: #2271b1;
+    font-variant-numeric: tabular-nums;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+.wssp-frq__file-link:hover {
+    background: #f0f6fc;
+    color: #135e96;
+}
+.wssp-frq__file-icon {
+    font-size: 14px;
+    line-height: 1;
+    opacity: 0.7;
+}
+.wssp-frq__file-link:hover .wssp-frq__file-icon {
+    opacity: 1;
+}
+
+/* ─── Review button in expand-toggle mode ─── */
+.wssp-frq__review-toggle[aria-expanded="true"] {
+    background: #50575e;
+    border-color: #50575e;
+}
+.wssp-frq__review-toggle[aria-expanded="true"]:hover {
+    background: #3c434a;
+    border-color: #3c434a;
+}
+
+/* ─── Inline expansion row ─── */
+.wssp-frq__expand-row td.wssp-frq__expand-cell {
+    /* Override WP's tight table padding so the embedded panel has room. */
+    padding: 0;
+    background: #f6f7f7;
+    border-top: 2px solid #2271b1;
+    border-bottom: 2px solid #dcdcde;
+}
+.wssp-frq__panel-host {
+    padding: 18px 20px;
+    /* The embedded .wssp-upload panel brings its own styles from
+       file-upload.css; we just give it a container with breathing room. */
+    max-width: 1100px;
+}
+.wssp-frq__panel-host:empty::before {
+    content: 'Loading review panel…';
+    color: #646970;
+    font-style: italic;
+}

@@ -60,8 +60,42 @@ class WSSP_Reports {
         if ( strpos( $hook, 'wssp-report' ) === false ) {
             return;
         }
-        wp_enqueue_style( 'wssp-admin', WSSP_PLUGIN_URL . 'admin/css/admin.css', array(), WSSP_VERSION );
+        wp_enqueue_style( 'wssp-admin',   WSSP_PLUGIN_URL . 'admin/css/admin.css', array(), WSSP_VERSION );
         wp_enqueue_style( 'wssp-reports', WSSP_PLUGIN_URL . 'admin/css/reports.css', array( 'wssp-admin' ), WSSP_VERSION );
+
+        // ─── File Review Queue — inline review panels ───
+        // Reuse the same CSS and JS module that the public portal uses
+        // for its file drawer. One source of truth for styling and
+        // behavior; logistics sees exactly what sponsors see.
+        if ( strpos( $hook, 'wssp-report-files' ) !== false ) {
+            wp_enqueue_style(
+                'wssp-file-upload',
+                WSSP_PLUGIN_URL . 'public/css/file-upload.css',
+                array( 'wssp-reports' ),
+                WSSP_VERSION
+            );
+            wp_enqueue_script(
+                'wssp-file-panel',
+                WSSP_PLUGIN_URL . 'public/js/wssp-file-panel.js',
+                array(),
+                WSSP_VERSION,
+                true
+            );
+            wp_enqueue_script(
+                'wssp-file-queue',
+                WSSP_PLUGIN_URL . 'admin/js/file-queue.js',
+                array( 'wssp-file-panel' ),
+                WSSP_VERSION,
+                true
+            );
+            // WSSPFilePanel depends on a global `wsspData`; the public
+            // side gets it via the portal's wp_localize_script, but the
+            // admin side needs its own copy.
+            wp_localize_script( 'wssp-file-panel', 'wsspData', array(
+                'restUrl' => rest_url( 'wssp/v1/' ),
+                'nonce'   => wp_create_nonce( 'wp_rest' ),
+            ) );
+        }
     }
 
     /* ───────────────────────────────────────────
@@ -810,10 +844,16 @@ class WSSP_Reports {
         header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
 
         $out = fopen( 'php://output', 'w' );
+
+        // PHP 8.4 deprecates the implicit default for fputcsv's $escape arg.
+        // Pass all five args explicitly: default separator/enclosure, plus
+        // empty string for $escape (the future-compatible value, which
+        // disables the legacy backslash-escape behavior CSV readers don't
+        // expect anyway).
         fputcsv( $out, array(
             'Session Code', 'Session Name', 'File Type', 'Version', 'Status',
             'Uploaded By', 'Uploaded At', 'Days in Status', 'Aging',
-        ) );
+        ), ',', '"', '' );
         foreach ( $rows as $r ) {
             fputcsv( $out, array(
                 $r['session_code'],
@@ -825,7 +865,7 @@ class WSSP_Reports {
                 $r['uploaded_at'],
                 $r['days_in_status'],
                 $r['is_aging'] ? 'YES' : '',
-            ) );
+            ), ',', '"', '' );
         }
         fclose( $out );
         exit;
@@ -856,6 +896,7 @@ class WSSP_Reports {
         $ver_field  = $field_map['wssp_material_version']            ?? 0;
         $st_field   = $field_map['wssp_admin_material_status']       ?? 0;
         $user_field = $field_map['wssp_material_user_id']            ?? 0;
+        $file_field = $field_map['wssp_material_file']               ?? 0;
 
         if ( ! $ft_field || ! $sk_field || ! $ver_field ) {
             return array();
@@ -872,12 +913,13 @@ class WSSP_Reports {
                     MAX(CASE WHEN m.field_id = %d THEN m.meta_value END) AS session_key,
                     MAX(CASE WHEN m.field_id = %d THEN m.meta_value END) AS version,
                     MAX(CASE WHEN m.field_id = %d THEN m.meta_value END) AS status,
-                    MAX(CASE WHEN m.field_id = %d THEN m.meta_value END) AS uploader_user_id
+                    MAX(CASE WHEN m.field_id = %d THEN m.meta_value END) AS uploader_user_id,
+                    MAX(CASE WHEN m.field_id = %d THEN m.meta_value END) AS file_attachment
              FROM {$wpdb->prefix}frm_items i
              INNER JOIN {$wpdb->prefix}frm_item_metas m ON m.item_id = i.id
              WHERE i.form_id = %d AND i.is_draft = 0
              GROUP BY i.id, i.created_at, i.user_id",
-            $ft_field, $sk_field, $ver_field, $st_field, $user_field, $form_id
+            $ft_field, $sk_field, $ver_field, $st_field, $user_field, $file_field, $form_id
         );
 
         $entries = $wpdb->get_results( $entries_sql, ARRAY_A );
@@ -988,6 +1030,36 @@ class WSSP_Reports {
             $uploader_id   = (int) $e['uploader_user_id'] ?: (int) $e['user_id'];
             $uploader_name = $users[ $uploader_id ] ?? '';
 
+            // Resolve the Formidable file upload field to a download URL.
+            // The field stores either a single attachment ID, a comma-list
+            // of IDs (multi-upload), or a serialized array — wp_get_attachment_url
+            // handles the single-ID case; we normalize to the first ID.
+            $file_url = '';
+            $raw_file = $e['file_attachment'] ?? '';
+            if ( $raw_file ) {
+                $first_id = 0;
+                if ( is_numeric( $raw_file ) ) {
+                    $first_id = (int) $raw_file;
+                } elseif ( is_string( $raw_file ) ) {
+                    $unser = @maybe_unserialize( $raw_file );
+                    if ( is_array( $unser ) && ! empty( $unser ) ) {
+                        $first_id = (int) reset( $unser );
+                    } else {
+                        // Fallback: comma-separated IDs
+                        $ids = array_filter( array_map( 'intval', explode( ',', $raw_file ) ) );
+                        if ( ! empty( $ids ) ) {
+                            $first_id = (int) reset( $ids );
+                        }
+                    }
+                }
+                if ( $first_id ) {
+                    $url = wp_get_attachment_url( $first_id );
+                    if ( $url ) {
+                        $file_url = $url;
+                    }
+                }
+            }
+
             $rows[] = array(
                 'entry_id'         => (int) $e['id'],
                 'session_id'       => (int) $session['id'],
@@ -1006,6 +1078,7 @@ class WSSP_Reports {
                 'uploaded_at'      => $e['created_at'],
                 'days_in_status'   => $days_in_status,
                 'is_aging'         => $is_aging,
+                'file_url'         => $file_url,
             );
         }
 

@@ -159,19 +159,35 @@ if ( ! function_exists( 'wssp_fr_queue_url' ) ) {
                         if ( $r['is_aging'] ) {
                             $row_class .= ' wssp-frq__row--aging';
                         }
+                        // Deterministic IDs let the expansion row pair cleanly
+                        // with its parent row for JS targeting + accessibility.
+                        $expand_id = 'wssp-frq-expand-' . (int) $r['session_id'] . '-' . esc_attr( $r['file_type'] );
                         ?>
-                        <tr class="<?php echo $row_class; ?>">
+                        <tr class="<?php echo $row_class; ?>"
+                            data-session-id="<?php echo (int) $r['session_id']; ?>"
+                            data-file-type="<?php echo esc_attr( $r['file_type'] ); ?>"
+                            data-expand-target="<?php echo esc_attr( $expand_id ); ?>">
                             <td>
-                                <a href="<?php echo esc_url( $session_url ); ?>" class="wssp-frq__session-link">
-                                    <strong><?php echo esc_html( $r['session_code'] ); ?></strong>
-                                </a>
+                                <strong><?php echo esc_html( $r['session_code'] ); ?></strong>
                                 <?php if ( ! empty( $r['short_name'] ) ) : ?>
                                     <div class="wssp-frq__session-name"><?php echo esc_html( $r['short_name'] ); ?></div>
                                 <?php endif; ?>
                             </td>
                             <td><?php echo esc_html( $r['file_type_label'] ); ?></td>
                             <td><?php echo esc_html( $r['phase_label'] ); ?></td>
-                            <td class="wssp-frq__col-version">v<?php echo (int) $r['version']; ?></td>
+                            <td class="wssp-frq__col-version">
+                                <?php if ( ! empty( $r['file_url'] ) ) : ?>
+                                    <a href="<?php echo esc_url( $r['file_url'] ); ?>"
+                                       target="_blank" rel="noopener"
+                                       class="wssp-frq__file-link"
+                                       title="Download v<?php echo (int) $r['version']; ?>">
+                                        v<?php echo (int) $r['version']; ?>
+                                        <span aria-hidden="true" class="wssp-frq__file-icon">↓</span>
+                                    </a>
+                                <?php else : ?>
+                                    v<?php echo (int) $r['version']; ?>
+                                <?php endif; ?>
+                            </td>
                             <td>
                                 <span class="wssp-frq__status wssp-frq__status--<?php echo esc_attr( $r['status_class'] ); ?>">
                                     <?php echo esc_html( $r['status_short'] ); ?>
@@ -186,8 +202,23 @@ if ( ! function_exists( 'wssp_fr_queue_url' ) ) {
                             </td>
                             <td><?php echo esc_html( $r['uploader_name'] ); ?></td>
                             <td class="wssp-frq__col-actions">
-                                <a href="<?php echo esc_url( $session_url ); ?>"
-                                   class="button button-small button-primary">Review</a>
+                                <button type="button"
+                                        class="button button-small button-primary wssp-frq__review-toggle"
+                                        data-expand-target="<?php echo esc_attr( $expand_id ); ?>"
+                                        aria-expanded="false"
+                                        aria-controls="<?php echo esc_attr( $expand_id ); ?>">
+                                    Review
+                                </button>
+                            </td>
+                        </tr>
+                        <tr class="wssp-frq__expand-row" id="<?php echo esc_attr( $expand_id ); ?>" hidden>
+                            <td colspan="9" class="wssp-frq__expand-cell">
+                                <div class="wssp-frq__panel-host"
+                                     data-session-id="<?php echo (int) $r['session_id']; ?>"
+                                     data-file-type="<?php echo esc_attr( $r['file_type'] ); ?>"
+                                     data-portal-url="<?php echo esc_url( $session_url ); ?>">
+                                    <!-- Panel HTML is injected here by wssp-file-panel.js -->
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; ?>
