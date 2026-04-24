@@ -1,0 +1,158 @@
+/* ═══════════════════════════════════════════════
+ * FORM DRAWER (Right-side sliding panel)
+ * ═══════════════════════════════════════════════ */
+.wssp-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: 9996;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.wssp-drawer-backdrop--visible {
+    opacity: 1;
+}
+
+.wssp-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 640px;
+    max-width: 90vw;
+    background: #fff;
+    z-index: 9997;
+    display: flex;
+    flex-direction: column;
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.wssp-drawer--open {
+    transform: translateX(0);
+}
+
+/* ─── Drawer Header ─── */
+.wssp-drawer__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 20px 24px;
+    border-bottom: 1px solid #eee;
+    flex-shrink: 0;
+}
+
+.wssp-drawer__header-left {
+    flex: 1;
+    min-width: 0;
+}
+
+.wssp-drawer__title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin: 0 0 2px;
+    line-height: 1.3;
+}
+
+.wssp-drawer__subtitle {
+    font-size: 15px;
+    color: #000;
+}
+
+/* ─── Video Backplate image display width) ─── */
+.video-backplate {
+    max-width: 540px;
+    margin-top: 25px;
+}
+
+.wssp-drawer__close {
+    background: none;
+    border: none;
+    color: #999;
+    cursor: pointer;
+    padding: 4px;
+    margin: -4px -4px 0 12px;
+    flex-shrink: 0;
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.wssp-drawer__close:hover {
+    background: #f0f0f0;
+    color: #333;
+}
+
+/* ─── Drawer Body ─── */
+.wssp-drawer__body {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ─── Iframe (fills the drawer body) ─── */
+.wssp-drawer__iframe {
+    width: 100%;
+    flex: 1;
+    border: none;
+    display: block;
+}
+
+/* ─── Content container ─── */
+.wssp-drawer__content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ─── Loading State ─── */
+.wssp-drawer__loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: #888;
+}
+
+.wssp-drawer__loading p {
+    margin: 12px 0 0;
+    font-size: 14px;
+}
+
+.wssp-drawer__spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #e5e5e5;
+    border-top-color: #1a1a2e;
+    border-radius: 50%;
+    animation: wssp-spin 0.7s linear infinite;
+}
+
+@keyframes wssp-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ─── Error State ─── */
+.wssp-drawer__error {
+    text-align: center;
+    padding: 40px 20px;
+    color: #888;
+}
+
+.wssp-drawer__error p {
+    margin: 0 0 16px;
+    font-size: 14px;
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 700px) {
+    .wssp-drawer {
+        width: 100vw;
+        max-width: 100vw;
+    }
+}

@@ -1,0 +1,747 @@
+/**
+ * Upload Panel — Dropzone, progress bar, and version history table.
+ *
+ * Renders inside the form drawer when an upload-type task is opened.
+ * Follows the same design language as portal.css and form-drawer.css.
+ *
+ * @package WSSP
+ */
+
+/* ═══════════════════════════════════════════
+ * UPLOAD CONTAINER
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload {
+    padding: 24px;
+}
+
+/* ═══════════════════════════════════════════
+ * DROPZONE
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload__dropzone {
+    border: 2px dashed #d1d5db;
+    border-radius: 12px;
+    padding: 40px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background-color 0.2s;
+    margin-bottom: 24px;
+    background: #fafafa;
+}
+
+.wssp-upload__dropzone:hover {
+    border-color: #93c5fd;
+    background: #f0f7ff;
+}
+
+.wssp-upload__dropzone--dragover {
+    border-color: #3b82f6;
+    background: #eff6ff;
+    border-style: solid;
+}
+
+.wssp-upload__dropzone--error {
+    border-color: #fca5a5;
+    background: #fef2f2;
+}
+
+.wssp-upload__dropzone-icon {
+    color: #9ca3af;
+    margin-bottom: 12px;
+}
+
+.wssp-upload__dropzone:hover .wssp-upload__dropzone-icon {
+    color: #3b82f6;
+}
+
+.wssp-upload__dropzone-text {
+    font-size: 15px;
+    color: #374151;
+    margin: 0 0 6px;
+    line-height: 1.5;
+}
+
+.wssp-upload__browse {
+    color: #3b82f6;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    transition: text-decoration-color 0.15s;
+}
+
+.wssp-upload__browse:hover {
+    text-decoration-color: #3b82f6;
+}
+
+.wssp-upload__dropzone-hint {
+    font-size: 13px;
+    color: #9ca3af;
+    margin: 0;
+}
+
+/* ─── Progress bar ─── */
+
+.wssp-upload__progress {
+    padding: 8px 0;
+}
+
+.wssp-upload__progress-bar {
+    width: 100%;
+    height: 6px;
+    background: #e5e7eb;
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.wssp-upload__progress-fill {
+    height: 100%;
+    background: #3b82f6;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.wssp-upload__progress-text {
+    font-size: 13px;
+    color: #6b7280;
+    margin: 0;
+    text-align: center;
+}
+
+/* ═══════════════════════════════════════════
+ * VERSION HISTORY TABLE
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload__history {
+    margin-top: 8px;
+}
+
+.wssp-upload__history-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+    margin: 0 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.wssp-upload__table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.wssp-upload__table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.wssp-upload__table thead th {
+    text-align: left;
+    font-weight: 500;
+    color: #6b7280;
+    padding: 8px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+}
+
+.wssp-upload__table tbody td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f3f4f6;
+    vertical-align: middle;
+}
+
+/* Active row highlighting */
+.wssp-upload__row--active {
+    background: #f0f9ff;
+}
+
+.wssp-upload__row--inactive {
+    opacity: 0.6;
+}
+
+.wssp-upload__row--inactive:hover {
+    opacity: 0.85;
+}
+
+/* Version badge */
+.wssp-upload__version-badge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.wssp-upload__version-badge--active {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+/* File name + size */
+.wssp-upload__cell--file {
+    max-width: 200px;
+}
+
+.wssp-upload__filename {
+    display: block;
+    font-weight: 500;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wssp-upload__filesize {
+    display: block;
+    font-size: 12px;
+    color: #9ca3af;
+    margin-top: 1px;
+}
+
+/* Status badge */
+.wssp-upload__status {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+.wssp-upload__status--uploaded {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.wssp-upload__status--approved {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.wssp-upload__status--revision_requested {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.wssp-upload__status--print_approved {
+    background: #ede9fe;
+    color: #5b21b6;
+}
+
+/* Download button in table */
+.wssp-upload__cell--actions {
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════
+ * VERSION ROWS (card-style layout)
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload__versions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.wssp-upload__version-row {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 14px 16px;
+    transition: opacity 0.15s;
+}
+
+.wssp-upload__version-row--active {
+    background: #f8fafc;
+    border-color: #bfdbfe;
+}
+
+.wssp-upload__version-row--inactive {
+    opacity: 0.55;
+}
+
+.wssp-upload__version-row--inactive:hover {
+    opacity: 0.8;
+}
+
+.wssp-upload__version-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.wssp-upload__version-meta {
+    font-size: 13px;
+    color: #6b7280;
+    flex: 1;
+}
+
+/* ═══════════════════════════════════════════
+ * STAGED UPLOAD (file selected, awaiting confirm)
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload__staged {
+    margin: 0 24px 16px;
+    padding: 16px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #f9fafb;
+}
+
+.wssp-upload__staged-file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 14px;
+    color: #374151;
+}
+
+.wssp-upload__staged-file svg {
+    color: #6b7280;
+    flex-shrink: 0;
+}
+
+.wssp-upload__staged-filename {
+    flex: 1;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wssp-upload__staged-remove {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: #9ca3af;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.wssp-upload__staged-remove:hover {
+    color: #ef4444;
+}
+
+.wssp-upload__staged-submit {
+    width: 100%;
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+/* ═══════════════════════════════════════════
+ * UPLOAD NOTE INPUT (visible, submitted with file)
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload__note-area {
+    margin-bottom: 12px;
+}
+
+.wssp-upload__label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 4px;
+}
+
+.wssp-upload__optional {
+    font-weight: 400;
+    color: #9ca3af;
+}
+
+.wssp-upload__note-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+.wssp-upload__note-input:focus {
+    outline: none;
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* ═══════════════════════════════════════════
+ * APPROVED NOTICE (file approved, no more uploads)
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload__approved-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 16px;
+    margin: 0 24px 16px;
+    background: #d1fae5;
+    border: 1px solid #6ee7b7;
+    border-radius: 8px;
+    color: #065f46;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.wssp-upload__approved-notice svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.wssp-upload__approved-notice p {
+    margin: 0;
+}
+
+.wssp-upload__approved-notice a {
+    color: #065f46;
+    font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════
+ * VBI FIELD (conditional for invite)
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload__vbi-field {
+    padding: 16px 24px;
+    margin-bottom: 8px;
+    border-top: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fefce8;
+}
+
+.wssp-upload__field-hint {
+    font-size: 13px;
+    color: #6b7280;
+    margin: 4px 0 10px;
+}
+
+.wssp-upload__radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.wssp-upload__radio {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #374151;
+    cursor: pointer;
+}
+
+.wssp-upload__radio input[type="radio"] {
+    margin: 0;
+    accent-color: #3b82f6;
+}
+
+/* ═══════════════════════════════════════════
+ * ADMIN ACTIONS (status change for logistics)
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload__admin-actions {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #f3f4f6;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.wssp-upload__status-select {
+    padding: 5px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 13px;
+    background: white;
+    flex: 1;
+    max-width: 280px;
+}
+
+/* ═══════════════════════════════════════════
+ * CHANGE REQUEST
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload__change-request {
+    margin: 8px 0;
+    padding: 10px 14px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-left: 3px solid #ef4444;
+    border-radius: 4px;
+}
+
+.wssp-upload__change-request-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    color: #dc2626;
+    margin-bottom: 4px;
+}
+
+.wssp-upload__change-request-text {
+    font-size: 13px;
+    color: #374151;
+    white-space: pre-wrap;
+}
+
+.wssp-upload__change-note {
+    width: 100%;
+    min-height: 60px;
+    margin: 6px 0;
+    padding: 8px;
+    font-size: 13px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.wssp-upload__change-note:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+/* Wrap admin actions vertically when textarea is visible */
+.wssp-upload__admin-actions:has(.wssp-upload__change-note[style*="block"]) {
+    flex-wrap: wrap;
+}
+
+.wssp-upload__admin-actions:has(.wssp-upload__change-note[style*="block"]) .wssp-upload__change-note {
+    flex-basis: 100%;
+    order: 2;
+}
+
+.wssp-upload__admin-actions:has(.wssp-upload__change-note[style*="block"]) .wssp-upload__status-save {
+    order: 3;
+}
+
+/* ═══════════════════════════════════════════
+ * NOTES
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload__notes {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #f3f4f6;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.wssp-upload__note {
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.wssp-upload__note--logistics {
+    background: #eff6ff;
+    border-left: 3px solid #3b82f6;
+}
+
+.wssp-upload__note--sponsor {
+    background: #f0fdf4;
+    border-left: 3px solid #22c55e;
+}
+
+.wssp-upload__note--general {
+    background: #f9fafb;
+    border-left: 3px solid #d1d5db;
+}
+
+.wssp-upload__note-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.wssp-upload__note-author {
+    font-weight: 600;
+    color: #111827;
+}
+
+.wssp-upload__note-role {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6b7280;
+    background: #f3f4f6;
+    padding: 1px 6px;
+    border-radius: 3px;
+}
+
+.wssp-upload__note-date {
+    font-size: 12px;
+    color: #9ca3af;
+    margin-left: auto;
+}
+
+.wssp-upload__note-body {
+    color: #374151;
+    line-height: 1.5;
+}
+
+/* ─── Add note input ─── */
+
+.wssp-upload__add-note {
+    margin-top: 8px;
+}
+
+.wssp-upload__note-input-row {
+    display: flex;
+    gap: 8px;
+}
+
+.wssp-upload__note-add-input {
+    flex: 1;
+    padding: 6px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+}
+
+.wssp-upload__note-add-input:focus {
+    outline: none;
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* ═══════════════════════════════════════════
+ * EMPTY STATE
+ * ═══════════════════════════════════════════ */
+
+.wssp-upload__empty {
+    text-align: center;
+    padding: 40px 24px;
+    color: #9ca3af;
+}
+
+.wssp-upload__empty p {
+    margin: 0;
+    font-size: 14px;
+}
+
+/* ═══════════════════════════════════════════
+ * UPLOAD BUTTON STYLE (task card)
+ * ═══════════════════════════════════════════ */
+
+.wssp-btn--upload {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+}
+
+.wssp-btn--upload:hover {
+    background: #dbeafe;
+    border-color: #93c5fd;
+}
+
+/* ═══════════════════════════════════════════
+ * SMALL BUTTON VARIANT (used in table rows)
+ * ═══════════════════════════════════════════ */
+
+.wssp-btn--sm {
+    padding: 4px 8px;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.wssp-btn--outline {
+    background: transparent;
+    border: 1px solid #d1d5db;
+    color: #6b7280;
+}
+
+.wssp-btn--outline:hover {
+    background: #f9fafb;
+    border-color: #9ca3af;
+    color: #374151;
+}
+
+/* ═══════════════════════════════════════════
+ * TASK CARD FILE INDICATOR
+ * ═══════════════════════════════════════════ */
+
+.wssp-task-card__row--file {
+    padding-left: 36px;
+}
+
+.wssp-task-card__file-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #6b7280;
+    flex-wrap: wrap;
+}
+
+.wssp-task-card__file-info svg {
+    color: #9ca3af;
+    flex-shrink: 0;
+}
+
+.wssp-task-card__file-link {
+    color: #2563eb;
+    text-decoration: none;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 250px;
+}
+
+.wssp-task-card__file-link:hover {
+    text-decoration: underline;
+}
+
+.wssp-task-card__file-version {
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b7280;
+    background: #f3f4f6;
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+
+.wssp-task-card__file-status {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.wssp-task-card__file-status--pending {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.wssp-task-card__file-status--approved {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.wssp-task-card__file-status--changes-required {
+    background: #fee2e2;
+    color: #991b1b;
+}

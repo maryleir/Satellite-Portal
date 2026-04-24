@@ -44,24 +44,14 @@ $has_data     = ! empty( $dates_entries );
                 Dates &amp; Deadlines not yet synced from Smartsheet.
             <?php endif; ?>
         </div>
-        <?php
-        // Sync itself is owned by the WS Conference Shortcodes plugin. Link
-        // to its admin page rather than running a parallel sync here — the
-        // two plugins used to write their own copy of the same sheet, and
-        // the two copies would drift.
-        $ws_cs_active = class_exists( 'WS_CS_Dates_Smartsheet' );
-        ?>
-        <?php if ( $ws_cs_active ) : ?>
-            <a class="button button-primary"
-               href="<?php echo esc_url( admin_url( 'admin.php?page=ws-cs-report' ) ); ?>">
+        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline;">
+            <?php wp_nonce_field( 'wssp_sync_dates' ); ?>
+            <input type="hidden" name="action" value="wssp_sync_dates" />
+            <button type="submit" class="button button-primary">
                 <span class="dashicons dashicons-update" style="vertical-align:middle;margin-right:4px;"></span>
                 Sync Dates from Smartsheet
-            </a>
-        <?php else : ?>
-            <span class="description" style="color:#dba617;">
-                Install &amp; activate the <em>WS Conference Shortcodes</em> plugin to sync dates.
-            </span>
-        <?php endif; ?>
+            </button>
+        </form>
     </div>
 
     <!-- ═══════════════════════════════════════════

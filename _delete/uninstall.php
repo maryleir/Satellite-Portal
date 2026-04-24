@@ -19,10 +19,6 @@ remove_role( 'wssp_vendor' );
 // Remove options
 delete_option( 'wssp_db_version' );
 delete_option( 'wssp_dashboard_page_id' );
-// Legacy option — previously written by WSSP_Dates_Deadlines_Smartsheet.
-// Dates/deadlines sync now lives in the WS Conference Shortcodes plugin
-// (option 'ws_cs_dates_deadlines'); clean up the orphan.
-delete_option( 'wssp_dates_deadlines' );
 
 // Remove usermeta
 $wpdb->query( "DELETE FROM {$wpdb->usermeta} WHERE meta_key LIKE 'wssp_%'" );

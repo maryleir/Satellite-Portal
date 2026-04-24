@@ -1384,33 +1384,6 @@ class WSSP_Smartsheet {
                 }
                 return (string) $value;
 
-            case 'date':
-                // Smartsheet DATE columns expect ISO 8601 (YYYY-MM-DD).
-                // Portal-side dates may arrive in various shapes: ISO strings,
-                // US-style "11/4/2026", Formidable field values, or already-
-                // normalized Y-m-d from the change-detection pass above.
-                // Mirror extract_cell_value()'s date handling so push and pull
-                // round-trip cleanly.
-                $str = trim( (string) $value );
-                if ( $str === '' ) {
-                    return '';
-                }
-                $ts = strtotime( $str );
-                if ( $ts === false ) {
-                    // Unparseable date. Log so the bad value can be fixed
-                    // upstream and return empty — sending the raw string to
-                    // Smartsheet would either 400 the PUT or silently store
-                    // garbage in a DATE column.
-                    error_log( sprintf(
-                        'WSSP: Unparseable date value "%s" for column "%s" (portal_key=%s). Push cell will be blanked.',
-                        $str,
-                        $mapping['ss_title'] ?? '(unknown)',
-                        $mapping['portal_key'] ?? '(unknown)'
-                    ) );
-                    return '';
-                }
-                return date( 'Y-m-d', $ts );
-
             default:
                 return (string) $value;
         }

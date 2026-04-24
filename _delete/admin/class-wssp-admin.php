@@ -35,13 +35,17 @@ class WSSP_Admin {
     
     /** @var WSSP_Formidable */
     private $formidable;
+    
+    /** @var WSSP_Dates_Deadlines_Smartsheet */
+    private $dates_smartsheet;
 
-
+    
 
     public function __construct( WSSP_Config $config, WSSP_Session_Access $access, 
                                  WSSP_Audit_Log $audit,
                                  WSSP_Session_Meta $session_meta, WSSP_Smartsheet $smartsheet,
-                                 WSSP_Formidable $formidable ) {
+                                 WSSP_Formidable $formidable,
+                                 WSSP_Dates_Deadlines_Smartsheet $dates_smartsheet  ) {
     
         $this->config  = $config;
         $this->access  = $access;
@@ -49,6 +53,7 @@ class WSSP_Admin {
         $this->session_meta = $session_meta;
         $this->smartsheet = $smartsheet;
         $this->formidable = $formidable;
+        $this->dates_smartsheet = $dates_smartsheet;
 
         global $wpdb;
         $this->sessions_table = $wpdb->prefix . 'wssp_sessions';
@@ -658,33 +663,20 @@ public function handle_smartsheet_pull() {
         check_admin_referer( 'wssp_sync_dates' );
         if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized.' );
 
-        // Sync is owned by the WS Conference Shortcodes plugin now. Redirect
-        // admins there rather than running a parallel pull that would
-        // re-introduce the drift this migration just eliminated. We can't
-        // safely POST to the foreign admin_post_ws_cs_sync_dates action from
-        // here (WordPress would reject a nonce generated under a different
-        // action), so a GET redirect to the WS-CS report page is the honest
-        // path: the user sees the sync button there and clicks it.
-        $target = class_exists( 'WS_CS_Dates_Smartsheet' )
-            ? admin_url( 'admin.php?page=ws-cs-report' )
-            : admin_url( 'plugins.php' );
+        $result = $this->dates_smartsheet->pull();
+        WSSP_Conference_Shortcodes::bust_cache();
 
-        wp_safe_redirect( $target );
+        $status = $result['success'] ? 'synced' : 'sync_error';
+        wp_safe_redirect( admin_url(
+            "admin.php?page=wssp-shortcode-report&{$status}=1&msg=" . urlencode( $result['message'] )
+        ) );
         exit;
     }
     
     public function render_shortcode_report() {
-    // 1. Date/deadline entries — read from the WS Conference Shortcodes plugin,
-    //    which is the single writer of the dates/deadlines sync. If the
-    //    plugin isn't active, fall back to empty arrays so the report page
-    //    still renders (the soft-dep admin notice covers the "why empty").
-    if ( class_exists( 'WS_CS_Dates_Smartsheet' ) ) {
-        $dates_entries   = WS_CS_Dates_Smartsheet::get_entries();
-        $dates_sync_info = WS_CS_Dates_Smartsheet::get_sync_info();
-    } else {
-        $dates_entries   = array();
-        $dates_sync_info = array( 'synced_at' => null, 'sheet_id' => null, 'count' => 0 );
-    }
+    // 1. Date/deadline entries from Smartsheet sync
+    $dates_entries   = WSSP_Dates_Deadlines_Smartsheet::get_entries();
+    $dates_sync_info = WSSP_Dates_Deadlines_Smartsheet::get_sync_info();
 
     // 2. Session shortcode map (read the static property via reflection or
     //    use the get_available_shortcodes method to derive the map)

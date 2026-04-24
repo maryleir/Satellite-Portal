@@ -93,28 +93,22 @@ add_action( 'plugins_loaded', function () {
         });
         return; // Bail — nothing works without task content.
     }
-
-    // ─── Soft dependency: WS Conference Shortcodes owns dates/deadlines sync ───
-    // The portal previously synced the Dates & Deadlines sheet itself into
-    // wp_option 'wssp_dates_deadlines'. That duplicated what ws-conference-
-    // shortcodes already does into 'ws_cs_dates_deadlines', and the two
-    // options would drift every time one was synced and not the other.
-    // The shortcodes plugin is now the single writer; the portal only reads.
-    // If it's missing, surface a warning but keep the portal functional —
-    // sessions, Smartsheet sync, and task surfacing all work without dates.
-    if ( ! class_exists( 'WS_CS_Dates_Smartsheet' ) ) {
-        add_action( 'admin_notices', function () {
-            echo '<div class="notice notice-warning"><p>'
-               . '<strong>Satellite Portal:</strong> '
-               . 'The <em>WS Conference Shortcodes</em> plugin is not active. '
-               . 'Date and deadline shortcodes will not resolve until it is activated.'
-               . '</p></div>';
-        });
-    }
-
+    
     // Register session-aware shortcodes early so they're available
     // before any template renders call do_shortcode()
     WSSP_Session_Shortcodes::register();
+    
+    // === Load dates/deadlines config and register conference shortcodes ===
+    $dates_config = array();
+    $dates_config_file = WSSP_PLUGIN_DIR . 'config/dates-deadlines-field-map.php';
+    if ( file_exists( $dates_config_file ) ) {
+        $dates_config = require $dates_config_file;
+    }
+    $dates_smartsheet = new WSSP_Dates_Deadlines_Smartsheet( $dates_config );
+
+    // Register conference date/deadline shortcodes from synced data
+    // (these won't clobber $world_data shortcodes — shortcode_exists() is checked)
+    //WSSP_Conference_Shortcodes::register();
 
 
 
@@ -165,7 +159,7 @@ add_action( 'plugins_loaded', function () {
 
     // Admin — task content editing now lives in the WSSP Task Content plugin
     if ( is_admin() ) {
-        new WSSP_Admin( $config, $access, $audit, $session_meta, $smartsheet, $formidable );
+        new WSSP_Admin( $config, $access, $audit, $session_meta, $smartsheet, $formidable, $dates_smartsheet );
         new WSSP_Reports( $config, $audit, $session_meta, $formidable );
         new WSSP_Notification_Settings(); 
     }
