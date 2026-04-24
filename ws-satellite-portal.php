@@ -127,7 +127,7 @@ add_action( 'plugins_loaded', function () {
     $task_content = new WSSP_Task_Content( $config );
     $session_meta = new WSSP_Session_Meta();
     $smartsheet   = new WSSP_Smartsheet( $config, $session_meta, $audit );
-    $file_uploads = new WSSP_REST_File_Uploads( $access, $config, $audit );
+    $file_uploads = new WSSP_REST_File_Uploads( $access, $config, $audit, $notifier );
 
 
     // Formidable service — always instantiated early because it registers hooks

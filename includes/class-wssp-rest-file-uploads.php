@@ -37,6 +37,9 @@ class WSSP_REST_File_Uploads {
     /** @var WSSP_Audit_Log */
     private $audit;
 
+    /** @var WSSP_Notifier|null Optional; emails on upload/review/comment events. */
+    private $notifier;
+
     /** @var string Formidable form key for material uploads. */
     private $form_key = 'wssp-sat-material-upload';
 
@@ -68,10 +71,11 @@ class WSSP_REST_File_Uploads {
         'wssp_comment_type',
     );
 
-    public function __construct( WSSP_Session_Access $access, WSSP_Config $config, WSSP_Audit_Log $audit ) {
-        $this->access = $access;
-        $this->config = $config;
-        $this->audit  = $audit;
+    public function __construct( WSSP_Session_Access $access, WSSP_Config $config, WSSP_Audit_Log $audit, WSSP_Notifier $notifier = null ) {
+        $this->access   = $access;
+        $this->config   = $config;
+        $this->audit    = $audit;
+        $this->notifier = $notifier;
 
         add_action( 'rest_api_init', array( $this, 'register_routes' ) );
     }
@@ -350,6 +354,23 @@ class WSSP_REST_File_Uploads {
             ),
         ));
 
+        // ─── Notify (email) ───
+        // Sponsor upload → review-team inbox. Routed by event_type; see
+        // WSSP_Notifier for mode and recipient handling. Uses upload_note
+        // (not the auto "Initial upload"/"New version" label) because that
+        // text is the sponsor's own commentary and is what the reader
+        // actually wants to see in the email.
+        if ( $this->notifier ) {
+            $this->notifier->notify_file_uploaded(
+                $session,
+                $entry_id,
+                $file_type,
+                $next_version,
+                $upload_note,
+                $user_id
+            );
+        }
+
         // ─── Mark upload task as in_progress ───
         // The upload itself means the sponsor has started this task.
         // Completion happens when logistics approves the file.
@@ -420,12 +441,29 @@ class WSSP_REST_File_Uploads {
             FrmEntryMeta::update_entry_meta( $entry_id, $field_map['wssp_admin_material_date_approved'], null, current_time( 'Y-m-d' ) );
         }
 
-        // Save change request note on the entry
-        if ( $is_changes_required && isset( $field_map['wssp_material_change_requested'] ) ) {
+        // Save change request note on the entry (drives the "Changes Requested"
+        // banner in render_upload_panel) AND create a logistics-type comment
+        // row so the full review history lives in the comment thread.
+        //
+        // Plumbing note: FrmEntryMeta::update_entry_meta only updates an
+        // existing meta row — it silently no-ops if no row exists yet. The
+        // upload handler does not seed this field when the entry is created,
+        // so the first rejection on a given entry has no row to update. We
+        // call add_entry_meta first (safe no-op if a row already exists from
+        // a prior rejection or approval-clear) then update_entry_meta to
+        // ensure the latest value sticks in all cases.
+        if ( $is_changes_required && ! empty( $change_note ) && isset( $field_map['wssp_material_change_requested'] ) ) {
             $reviewer       = get_userdata( $user_id );
             $reviewer_name  = $reviewer ? $reviewer->display_name : 'Logistics';
             $timestamped    = sprintf( '[%s — %s] %s', current_time( 'M j, Y g:i a' ), $reviewer_name, $change_note );
-            FrmEntryMeta::update_entry_meta( $entry_id, $field_map['wssp_material_change_requested'], null, $timestamped );
+            $cr_field_id    = $field_map['wssp_material_change_requested'];
+
+            FrmEntryMeta::add_entry_meta( $entry_id, $cr_field_id, null, $timestamped );
+            FrmEntryMeta::update_entry_meta( $entry_id, $cr_field_id, null, $timestamped );
+
+            // Append to the comment thread as a logistics note so history is
+            // preserved even after approval clears the banner field above.
+            $this->create_note( $entry_id, $session['session_key'], $user_id, $change_note, 'logistics' );
         }
 
         // Clear the change request field on approval (clean slate)
@@ -496,6 +534,30 @@ class WSSP_REST_File_Uploads {
             'new_value'   => $task_status_value,
             'meta'        => $audit_meta,
         ));
+
+        // ─── Notify (email) ───
+        // One event per logistics review action. For "Changes Required", the
+        // change_note is carried in the payload so the renderer can show the
+        // rejection text inline — collapsing the banner-field + logistics-
+        // comment plumbing into a single human-readable event.
+        if ( $this->notifier ) {
+            $version_for_email = 0;
+            foreach ( $entries as $e ) {
+                if ( (int) ( $e['id'] ?? 0 ) === (int) $entry_id ) {
+                    $version_for_email = (int) ( $e['wssp_material_version'] ?? 0 );
+                    break;
+                }
+            }
+            $this->notifier->notify_file_status_changed(
+                $session,
+                $entry_id,
+                $file_type,
+                $version_for_email,
+                $new_status,
+                $change_note,
+                $user_id
+            );
+        }
 
         // Re-render
         $can_edit   = $this->can_edit( $user_id, $session_id );
@@ -572,6 +634,30 @@ class WSSP_REST_File_Uploads {
         $entries    = $this->query_entries( $session['session_key'], $file_type );
         $entry_ids  = array_column( $entries, 'id' );
         $comments   = ! empty( $entry_ids ) ? $this->query_comments_for_entries( $entry_ids, $session['session_key'] ) : array();
+
+        // ─── Notify (email) ───
+        // Only the user-initiated Post-button flow reaches this path. The
+        // logistics comment that is auto-created inside update_status() is
+        // already covered by notify_file_status_changed there, so notifying
+        // here would double-count rejections in the digest.
+        if ( $this->notifier ) {
+            $version_for_email = 0;
+            foreach ( $entries as $e ) {
+                if ( (int) ( $e['id'] ?? 0 ) === (int) $entry_id ) {
+                    $version_for_email = (int) ( $e['wssp_material_version'] ?? 0 );
+                    break;
+                }
+            }
+            $this->notifier->notify_comment_added(
+                $session,
+                $entry_id,
+                $file_type,
+                $version_for_email,
+                $comment_text,
+                $note_type,
+                $user_id
+            );
+        }
 
         $event_type       = $session['event_type'] ?? 'satellite';
         $file_type_config = $this->config->get_file_type( $event_type, $file_type );

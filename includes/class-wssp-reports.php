@@ -49,6 +49,7 @@ class WSSP_Reports {
 
         add_action( 'admin_menu', array( $this, 'register_menus' ), 20 );
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+        add_action( 'admin_init', array( $this, 'maybe_handle_file_queue_export' ) );
     }
 
     /* ───────────────────────────────────────────
@@ -94,6 +95,15 @@ class WSSP_Reports {
             'edit_posts',
             'wssp-report-tasks',
             array( $this, 'render_task_completion' )
+        );
+
+        add_submenu_page(
+            'wssp-dashboard',
+            'File Review Queue',
+            'File Review Queue',
+            'edit_posts',
+            'wssp-report-files',
+            array( $this, 'render_file_review_queue' )
         );
     }
 
@@ -706,5 +716,409 @@ class WSSP_Reports {
         }
         $label = ucwords( str_replace( '_', ' ', $status ) );
         return '<span class="wssp-status wssp-status--' . esc_attr( $status ) . '">' . esc_html( $label ) . '</span>';
+    }
+
+    /* ═══════════════════════════════════════════
+     * REPORT — File Review Queue
+     * Cross-session list of every material upload's
+     * latest version with its current review status.
+     * ═══════════════════════════════════════════ */
+
+    /** Formidable form key for material uploads — matches WSSP_REST_File_Uploads. */
+    const FILE_QUEUE_FORM_KEY       = 'wssp-sat-material-upload';
+    const FILE_QUEUE_SESSION_FIELD  = 'wssp_material_session_key';
+
+    /** Aging threshold: files pending review longer than this are flagged. */
+    const FILE_QUEUE_AGING_DAYS     = 3;
+
+    /** Status dropdown values — must match WSSP_REST_File_Uploads::$valid_statuses. */
+    const FILE_STATUS_PENDING       = 'Pending, Not Reviewed';
+    const FILE_STATUS_CHANGES       = 'Reviewed, Changes Required (See Notes)';
+    const FILE_STATUS_APPROVED      = 'Approved';
+
+    /**
+     * Render the File Review Queue admin page.
+     *
+     * Loads the latest version per (session × file_type), applies any
+     * request-level filters, and hands the view file a clean set of
+     * arrays. Filters are reflected in the querystring so planners can
+     * bookmark their view.
+     */
+    public function render_file_review_queue() {
+        $filters = $this->parse_file_queue_filters();
+        $rows    = $this->load_file_review_queue( $filters );
+
+        // Count badges run against the *unfiltered-by-status* set so the
+        // top counter pills stay stable as the user clicks through them.
+        $filters_for_counts              = $filters;
+        $filters_for_counts['status']    = '';
+        $rows_for_counts                 = $this->load_file_review_queue( $filters_for_counts );
+        $counts                          = $this->compute_file_queue_counts( $rows_for_counts );
+
+        // Phase-filter options come from get_phases() which merges TC data
+        // with behavior overrides. file_types come from the raw portal config.
+        $event_type   = 'satellite';
+        $event_config = $this->config->get_event_type( $event_type );
+        $phases       = $this->config->get_phases( $event_type );
+        $file_types   = isset( $event_config['file_types'] ) ? $event_config['file_types'] : array();
+
+        // Recent file-related activity, last 14 days. Scoped by action so this
+        // block stays distinct from the Logistics Dashboard's all-actions feed.
+        $recent_activity = $this->load_file_queue_activity( 14 );
+
+        $base_url   = admin_url( 'admin.php?page=wssp-report-files' );
+        $export_url = add_query_arg( array_merge( $filters, array( 'export' => 'csv' ) ), $base_url );
+
+        include WSSP_PLUGIN_DIR . 'admin/views/report-file-review-queue.php';
+    }
+
+    /**
+     * Read and sanitize querystring filters for the file queue.
+     */
+    private function parse_file_queue_filters() {
+        $status = isset( $_GET['status'] ) ? sanitize_text_field( wp_unslash( $_GET['status'] ) ) : '';
+        if ( ! in_array( $status, array( '', 'pending', 'changes', 'approved' ), true ) ) {
+            $status = '';
+        }
+        return array(
+            'status'    => $status,
+            'phase'     => isset( $_GET['phase'] )     ? sanitize_key( $_GET['phase'] )     : '',
+            'file_type' => isset( $_GET['file_type'] ) ? sanitize_key( $_GET['file_type'] ) : '',
+            'search'    => isset( $_GET['search'] )    ? sanitize_text_field( wp_unslash( $_GET['search'] ) ) : '',
+            'aging'     => ! empty( $_GET['aging'] )   ? '1' : '',
+        );
+    }
+
+    /**
+     * CSV export handler.
+     *
+     * Fires on admin_init so we can send headers before any output. Only
+     * runs when we're actually on the file-queue page with export=csv.
+     */
+    public function maybe_handle_file_queue_export() {
+        if ( ! is_admin() )                                      return;
+        if ( ( $_GET['page']   ?? '' ) !== 'wssp-report-files' ) return;
+        if ( ( $_GET['export'] ?? '' ) !== 'csv' )               return;
+        if ( ! current_user_can( 'edit_posts' ) )                return;
+
+        $filters = $this->parse_file_queue_filters();
+        $rows    = $this->load_file_review_queue( $filters );
+
+        $filename = 'file-review-queue-' . current_time( 'Y-m-d' ) . '.csv';
+        nocache_headers();
+        header( 'Content-Type: text/csv; charset=UTF-8' );
+        header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+
+        $out = fopen( 'php://output', 'w' );
+        fputcsv( $out, array(
+            'Session Code', 'Session Name', 'File Type', 'Version', 'Status',
+            'Uploaded By', 'Uploaded At', 'Days in Status', 'Aging',
+        ) );
+        foreach ( $rows as $r ) {
+            fputcsv( $out, array(
+                $r['session_code'],
+                $r['short_name'],
+                $r['file_type_label'],
+                $r['version'],
+                $this->normalize_status_label( $r['status'] ),
+                $r['uploader_name'],
+                $r['uploaded_at'],
+                $r['days_in_status'],
+                $r['is_aging'] ? 'YES' : '',
+            ) );
+        }
+        fclose( $out );
+        exit;
+    }
+
+    /**
+     * Load the File Review Queue dataset.
+     *
+     * One row per (session × file_type) at its latest version, joined with
+     * session metadata and author info. Returns an ordered array with
+     * oldest-pending first so the planner naturally sees what's been
+     * waiting longest at the top.
+     */
+    private function load_file_review_queue( $filters ) {
+        global $wpdb;
+
+        $form_id = $this->file_queue_form_id();
+        if ( ! $form_id ) {
+            return array();
+        }
+        $field_map = $this->file_queue_field_map( $form_id );
+        if ( empty( $field_map ) ) {
+            return array();
+        }
+
+        $ft_field   = $field_map['wssp_material_file_type']          ?? 0;
+        $sk_field   = $field_map[ self::FILE_QUEUE_SESSION_FIELD ]   ?? 0;
+        $ver_field  = $field_map['wssp_material_version']            ?? 0;
+        $st_field   = $field_map['wssp_admin_material_status']       ?? 0;
+        $user_field = $field_map['wssp_material_user_id']            ?? 0;
+
+        if ( ! $ft_field || ! $sk_field || ! $ver_field ) {
+            return array();
+        }
+
+        // Pull every non-draft material entry with its identifying meta in
+        // one query. Older versions are filtered out per (session, file_type)
+        // below in PHP — doing that group-max in SQL on Formidable's meta
+        // structure is ugly, and the dataset here is small enough that in-PHP
+        // aggregation is clearer and fast enough.
+        $entries_sql = $wpdb->prepare(
+            "SELECT i.id, i.created_at, i.user_id,
+                    MAX(CASE WHEN m.field_id = %d THEN m.meta_value END) AS file_type,
+                    MAX(CASE WHEN m.field_id = %d THEN m.meta_value END) AS session_key,
+                    MAX(CASE WHEN m.field_id = %d THEN m.meta_value END) AS version,
+                    MAX(CASE WHEN m.field_id = %d THEN m.meta_value END) AS status,
+                    MAX(CASE WHEN m.field_id = %d THEN m.meta_value END) AS uploader_user_id
+             FROM {$wpdb->prefix}frm_items i
+             INNER JOIN {$wpdb->prefix}frm_item_metas m ON m.item_id = i.id
+             WHERE i.form_id = %d AND i.is_draft = 0
+             GROUP BY i.id, i.created_at, i.user_id",
+            $ft_field, $sk_field, $ver_field, $st_field, $user_field, $form_id
+        );
+
+        $entries = $wpdb->get_results( $entries_sql, ARRAY_A );
+        if ( empty( $entries ) ) {
+            return array();
+        }
+
+        // Keep only the latest version per (session_key, file_type).
+        $latest = array();
+        foreach ( $entries as $e ) {
+            $sk = $e['session_key'] ?: '';
+            $ft = $e['file_type']   ?: '';
+            if ( '' === $sk || '' === $ft ) {
+                continue;
+            }
+            $key = $sk . '|' . $ft;
+            if ( ! isset( $latest[ $key ] ) || (int) $e['version'] > (int) $latest[ $key ]['version'] ) {
+                $latest[ $key ] = $e;
+            }
+        }
+        if ( empty( $latest ) ) {
+            return array();
+        }
+
+        // Join session info in bulk.
+        $session_keys = array_unique( array_column( $latest, 'session_key' ) );
+        $placeholders = implode( ',', array_fill( 0, count( $session_keys ), '%s' ) );
+        $sessions     = $wpdb->get_results( $wpdb->prepare(
+            "SELECT id, session_code, short_name, event_type, session_key
+             FROM {$this->sessions_table}
+             WHERE session_key IN ({$placeholders})",
+            ...$session_keys
+        ), ARRAY_A );
+        $sessions_by_key = array();
+        foreach ( $sessions as $s ) {
+            $sessions_by_key[ $s['session_key'] ] = $s;
+        }
+
+        // Join user display names in bulk.
+        $user_ids = array_unique( array_filter( array_map( 'intval', array_column( $latest, 'uploader_user_id' ) ) ) );
+        $users    = array();
+        if ( ! empty( $user_ids ) ) {
+            $uid_placeholders = implode( ',', array_fill( 0, count( $user_ids ), '%d' ) );
+            $user_rows = $wpdb->get_results( $wpdb->prepare(
+                "SELECT ID, display_name FROM {$wpdb->users} WHERE ID IN ({$uid_placeholders})",
+                ...$user_ids
+            ), ARRAY_A );
+            foreach ( $user_rows as $u ) {
+                $users[ (int) $u['ID'] ] = $u['display_name'];
+            }
+        }
+
+        // Resolve phase labels per file_type through task_behavior config.
+        // Phases must come from get_phases() — it merges TC phase data with
+        // behavior overrides. The raw portal_config returned by
+        // get_event_type() does NOT include a 'phases' key; that lookup
+        // silently returns empty and leaves every row with a blank phase.
+        $event_type      = 'satellite';
+        $event_config    = $this->config->get_event_type( $event_type );
+        $file_types_cfg  = $event_config['file_types']    ?? array();
+        $task_behavior   = $event_config['task_behavior'] ?? array();
+        $phases_cfg      = $this->config->get_phases( $event_type );
+
+        $file_type_to_phase = array();
+        foreach ( $task_behavior as $task_key => $overrides ) {
+            if ( ( $overrides['type'] ?? '' ) !== 'upload' ) continue;
+            $ft = $overrides['file_type'] ?? '';
+            if ( ! $ft ) continue;
+            // Resolve phase by scanning phases for a task with this key.
+            foreach ( $phases_cfg as $p ) {
+                $phase_task_keys = array_column( $p['tasks'] ?? array(), 'key' );
+                if ( in_array( $task_key, $phase_task_keys, true ) ) {
+                    $file_type_to_phase[ $ft ] = array(
+                        'key'   => $p['key'],
+                        'label' => $p['label'],
+                    );
+                    break;
+                }
+            }
+        }
+
+        // Build final rows with derived fields.
+        $now_ts = current_time( 'timestamp' );
+        $rows   = array();
+        foreach ( $latest as $e ) {
+            $session = $sessions_by_key[ $e['session_key'] ] ?? null;
+            if ( ! $session ) {
+                // Orphaned entry — session row deleted but Formidable data lingers. Skip.
+                continue;
+            }
+            $status  = $e['status'] ?: self::FILE_STATUS_PENDING;
+            $ft      = $e['file_type'];
+
+            // created_at on the entry row is when the latest version was
+            // uploaded, which is also when the status last changed to
+            // "Pending, Not Reviewed". For review/approval, we don't have
+            // a separate timestamp column — close-enough approximation is
+            // the entry's own modified timestamp via updated_at if present.
+            $anchor_ts      = strtotime( $e['created_at'] );
+            $days_in_status = $anchor_ts ? floor( ( $now_ts - $anchor_ts ) / DAY_IN_SECONDS ) : 0;
+
+            $is_pending  = ( strpos( $status, 'Pending' )          !== false );
+            $is_aging    = $is_pending && $days_in_status >= self::FILE_QUEUE_AGING_DAYS;
+
+            $ft_label    = $file_types_cfg[ $ft ]['label'] ?? ucwords( str_replace( array( '_', '-' ), ' ', $ft ) );
+            $phase       = $file_type_to_phase[ $ft ] ?? array( 'key' => '', 'label' => '—' );
+
+            $uploader_id   = (int) $e['uploader_user_id'] ?: (int) $e['user_id'];
+            $uploader_name = $users[ $uploader_id ] ?? '';
+
+            $rows[] = array(
+                'entry_id'         => (int) $e['id'],
+                'session_id'       => (int) $session['id'],
+                'session_key'      => $session['session_key'],
+                'session_code'     => $session['session_code'],
+                'short_name'       => $session['short_name'],
+                'file_type'        => $ft,
+                'file_type_label'  => $ft_label,
+                'phase_key'        => $phase['key'],
+                'phase_label'      => $phase['label'],
+                'version'          => (int) $e['version'],
+                'status'           => $status,
+                'status_class'     => $this->status_css_class( $status ),
+                'status_short'     => $this->normalize_status_label( $status ),
+                'uploader_name'    => $uploader_name ?: '(unknown)',
+                'uploaded_at'      => $e['created_at'],
+                'days_in_status'   => $days_in_status,
+                'is_aging'         => $is_aging,
+            );
+        }
+
+        // Apply filters in PHP.
+        $rows = array_filter( $rows, function ( $r ) use ( $filters ) {
+            if ( $filters['status'] === 'pending'  && strpos( $r['status'], 'Pending' )          === false ) return false;
+            if ( $filters['status'] === 'changes'  && strpos( $r['status'], 'Changes Required' ) === false ) return false;
+            if ( $filters['status'] === 'approved' && strpos( $r['status'], 'Approved' )         === false ) return false;
+            if ( $filters['phase']     && $r['phase_key'] !== $filters['phase'] )         return false;
+            if ( $filters['file_type'] && $r['file_type'] !== $filters['file_type'] )     return false;
+            if ( $filters['aging']     && ! $r['is_aging'] )                              return false;
+            if ( $filters['search'] ) {
+                $needle = strtolower( $filters['search'] );
+                $hay    = strtolower( $r['session_code'] . ' ' . $r['short_name'] . ' ' . $r['file_type_label'] );
+                if ( strpos( $hay, $needle ) === false ) return false;
+            }
+            return true;
+        } );
+
+        // Sort: oldest pending first, then oldest Changes Required, then the rest by session_code.
+        usort( $rows, function ( $a, $b ) {
+            $pri = function ( $r ) {
+                if ( strpos( $r['status'], 'Pending' )          !== false ) return 0;
+                if ( strpos( $r['status'], 'Changes Required' ) !== false ) return 1;
+                return 2;
+            };
+            $pa = $pri( $a );
+            $pb = $pri( $b );
+            if ( $pa !== $pb ) return $pa - $pb;
+            // Within the same priority, oldest-first for pending/changes, newest-first for approved.
+            return $pa < 2
+                ? strcmp( $a['uploaded_at'], $b['uploaded_at'] )
+                : strcmp( $b['uploaded_at'], $a['uploaded_at'] );
+        } );
+
+        return array_values( $rows );
+    }
+
+    /**
+     * Compute the four counter pills at the top of the queue.
+     */
+    private function compute_file_queue_counts( $rows ) {
+        $counts = array( 'total' => 0, 'pending' => 0, 'changes' => 0, 'approved' => 0 );
+        foreach ( $rows as $r ) {
+            $counts['total']++;
+            if ( strpos( $r['status'], 'Pending' )          !== false ) { $counts['pending']++; }
+            if ( strpos( $r['status'], 'Changes Required' ) !== false ) { $counts['changes']++; }
+            if ( strpos( $r['status'], 'Approved' )         !== false ) { $counts['approved']++; }
+        }
+        return $counts;
+    }
+
+    /**
+     * Pull the last N days of file-related audit entries for the bottom feed.
+     */
+    private function load_file_queue_activity( $days = 14 ) {
+        global $wpdb;
+        $audit_table = $wpdb->prefix . 'wssp_audit_log';
+        $since       = date( 'Y-m-d H:i:s', strtotime( "-{$days} days" ) );
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT al.action, al.created_at, al.user_id, al.entity_id, al.field_name,
+                    al.old_value, al.new_value, al.meta, al.session_id,
+                    s.session_code, s.short_name, s.session_key,
+                    u.display_name
+             FROM {$audit_table} al
+             LEFT JOIN {$this->sessions_table} s ON s.id = al.session_id
+             LEFT JOIN {$wpdb->users} u            ON u.ID = al.user_id
+             WHERE al.created_at > %s
+               AND al.action IN ('file_upload', 'status_change')
+             ORDER BY al.created_at DESC
+             LIMIT 200",
+            $since
+        ), ARRAY_A );
+    }
+
+    private function file_queue_form_id() {
+        static $id = null;
+        if ( null !== $id ) return $id;
+        if ( ! class_exists( 'FrmForm' ) ) { $id = 0; return $id; }
+        $form = FrmForm::getOne( self::FILE_QUEUE_FORM_KEY );
+        $id = $form ? (int) $form->id : 0;
+        return $id;
+    }
+
+    private function file_queue_field_map( $form_id ) {
+        static $cache = array();
+        if ( isset( $cache[ $form_id ] ) ) return $cache[ $form_id ];
+        global $wpdb;
+        $rows = $wpdb->get_results( $wpdb->prepare(
+            "SELECT id, field_key FROM {$wpdb->prefix}frm_fields WHERE form_id = %d",
+            $form_id
+        ), ARRAY_A );
+        $map = array();
+        foreach ( $rows as $r ) {
+            $map[ $r['field_key'] ] = (int) $r['id'];
+        }
+        $cache[ $form_id ] = $map;
+        return $map;
+    }
+
+    private function status_css_class( $status ) {
+        if ( strpos( $status, 'Approved' )         !== false ) return 'approved';
+        if ( strpos( $status, 'Changes Required' ) !== false ) return 'changes-required';
+        return 'pending';
+    }
+
+    /**
+     * Short, display-friendly form of a full Formidable status string.
+     */
+    private function normalize_status_label( $status ) {
+        if ( strpos( $status, 'Approved' )         !== false ) return 'Approved';
+        if ( strpos( $status, 'Changes Required' ) !== false ) return 'Changes Required';
+        if ( strpos( $status, 'Pending' )          !== false ) return 'Pending Review';
+        return $status;
     }
 }
