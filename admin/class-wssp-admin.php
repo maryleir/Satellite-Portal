@@ -722,7 +722,7 @@ private static function get_session_shortcode_map() {
         'topic'                    => 'topic',
         'session-code'             => 'session_code',
         'assigned-room'            => 'session_location',
-        'assigned-room-floor-plan' => 'session_floor_plan_url',
+        'assigned-room-floor-plan' => 'room_floor_plan_url',
         'av-contact'               => 'av_contact_name',
         'av-email'                 => 'av_contact_email',
         'session-date'             => 'session_date',

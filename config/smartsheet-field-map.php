@@ -111,6 +111,15 @@ return array(
             'direction'    => 'both',
             'type'         => 'text',
         ),
+        
+        array(
+            'ss_column_id' => 1470210503905156,
+            'ss_title'     => 'Room Floor Plan URL',
+            'portal_key'   => 'room_floor_plan_url',
+            'portal_store' => 'meta',
+            'direction'    => 'both',
+            'type'         => 'text',
+        ),
 
         // ─── Sponsor info (logistics-owned; pull at import, admin may push corrections) ───
         array(
@@ -366,6 +375,15 @@ return array(
             'portal_store' => 'formidable',
             'direction'    => 'push',
             'type'         => 'checkbox',
+        ),
+        
+        array(
+            'ss_column_id' => 7099710038118276,
+            'ss_title'     => 'Backplate Template URL',
+            'portal_key'   => 'backplate_template_url',
+            'portal_store' => 'meta',
+            'direction'    => 'both',
+            'type'         => 'text',
         ),
         array(
             'ss_column_id' => 2662228489359236,

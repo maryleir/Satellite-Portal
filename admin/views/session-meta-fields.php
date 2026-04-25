@@ -116,6 +116,31 @@ $m = function( $key, $default = '' ) use ( $meta ) {
                     </select>
                 </td>
             </tr>
+            
+            <tr>
+                <th scope="row">Room Floor Plan (url)</th>
+                <td>
+                
+                  <?php
+                    $room_floor_plan_url = $m( 'room_floor_plan_url' );
+                    $room_floor_plan_url = str_replace('[siteurl]', '', $room_floor_plan_url);
+                    $room_floor_plan_url = site_url($room_floor_plan_url);
+
+                    if ( $room_floor_plan_url ) :
+                    ?>
+                        <p>
+                            <a href="<?php echo esc_url( $room_floor_plan_url ); ?>" target="_blank" class="button button-small">
+                                View Current Floor Plan
+                            </a>
+                        </p>
+                    <?php endif; ?>
+
+
+                    <input type="text" name="meta[room_floor_plan_url]" class="regular-text"
+                           value="<?php echo esc_attr( $m( 'room_floor_plan_url' ) ); ?>">
+                </td>
+            </tr>
+
 
             <!-- ─── Contacts ─── -->
             <tr>
@@ -231,6 +256,9 @@ $m = function( $key, $default = '' ) use ( $meta ) {
                 <td>
                     <?php
                     $backplate_url = $m( 'backplate_template_url' );
+                    $backplate_url = str_replace('[siteurl]', '', $backplate_url);
+                    $backplate_url = site_url($backplate_url);
+
                     if ( $backplate_url ) :
                     ?>
                         <p>
@@ -240,7 +268,7 @@ $m = function( $key, $default = '' ) use ( $meta ) {
                         </p>
                     <?php endif; ?>
                     <input type="url" name="meta[backplate_template_url]" class="large-text"
-                           value="<?php echo esc_attr( $backplate_url ); ?>"
+                           value="<?php echo esc_attr( $m( 'backplate_template_url' ) ); ?>"
                            placeholder="URL to backplate template file">
                     <p class="description">Enter the URL of the backplate template. The sponsor will review and approve this in the portal.</p>
                 </td>

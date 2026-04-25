@@ -52,7 +52,7 @@ class WSSP_Session_Shortcodes {
 
         // ─── Venue / logistics (from Smartsheet via session_meta) ───
         'assigned-room'            => 'session_location',
-        'assigned-room-floor-plan' => 'session_floor_plan_url',
+        'assigned-room-floor-plan' => 'room_floor_plan_url',
 
         // ─── Contacts (from Smartsheet via session_meta) ───
         'av-contact'               => 'av_contact_name',
@@ -197,6 +197,12 @@ class WSSP_Session_Shortcodes {
 
         // URL fields → clickable link
         if ( str_ends_with( $tag, '-url' ) || str_ends_with( $tag, '-floor-plan' ) ) {
+              // Resolve [siteurl] placeholder to the actual site URL.
+              if ( strpos( $value, '[siteurl]' ) !== false ) {
+                  $value = str_replace( '[siteurl]', site_url(), $value );
+              }
+
+        
             if ( filter_var( $value, FILTER_VALIDATE_URL ) ) {
                 $label = str_contains( $tag, 'floor-plan' ) ? 'View Floor Plan' : 'View';
                 return '<a href="' . esc_url( $value ) . '" target="_blank" rel="noopener">' . $label . '</a>';
@@ -205,6 +211,12 @@ class WSSP_Session_Shortcodes {
 
         // Video backplate — could be URL or description
         if ( $tag === 'video-backplate' ) {
+        
+            // Resolve [siteurl] placeholder to the actual site URL.
+            if ( strpos( $value, '[siteurl]' ) !== false ) {
+                $value = str_replace( '[siteurl]', site_url(), $value );
+            }
+
             if ( filter_var( $value, FILTER_VALIDATE_URL ) ) {
                 return '<a href="' . esc_url( $value ) . '" target="_blank" rel="noopener"><img class="video-backplate" src="' . esc_url( $value ) . '"></a>';
             }
@@ -228,7 +240,7 @@ class WSSP_Session_Shortcodes {
 
         $categories = array(
             'Session Data' => array( 'title', 'name', 'topic', 'session-code' ),
-            'Venue'        => array( 'assigned-room', 'assigned-room-floor-plan' ),
+            'Venue'        => array( 'assigned-room', 'room_floor_plan_url' ),
             'Contacts'     => array( 'av-contact', 'av-email' ),
             'Schedule'     => array( 'session-date', 'session-time', 'session-day' ),
             'On Demand'    => array( 'video-backplate' ),
