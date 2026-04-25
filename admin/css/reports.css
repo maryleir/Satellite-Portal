@@ -958,3 +958,569 @@
     color: #646970;
     font-style: italic;
 }
+
+/**
+ * Sponsor Activity Report — styles to APPEND to admin/css/reports.css.
+ *
+ * Mirrors the visual language of the File Review Queue (.wssp-frq) so
+ * the two cross-session reports look like a coherent set. Scope is
+ * isolated under .wssp-act — no risk of stomping on file-queue styles.
+ */
+
+/* ─── Page wrapper ─── */
+.wssp-act .wssp-card {
+    margin-top: 20px;
+}
+
+/* ═══ Counter pills ═══ */
+.wssp-act__pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 16px 0 8px;
+}
+
+.wssp-act__pill {
+    align-items: center;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    color: #1d2327;
+    display: flex;
+    flex-direction: column;
+    min-width: 130px;
+    padding: 12px 16px;
+    text-align: center;
+    text-decoration: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.wssp-act__pill:hover  { background: #f6f7f7; border-color: #c3c4c7; }
+.wssp-act__pill:focus  { box-shadow: 0 0 0 1px #2271b1; outline: none; }
+.wssp-act__pill.is-active { border-width: 2px; padding: 11px 15px; /* compensate for thicker border */ }
+
+.wssp-act__pill--never.is-active   { border-color: #b32d2e; background: #fdf4f4; }
+.wssp-act__pill--recent.is-active  { border-color: #2e7d32; background: #f3faf3; }
+.wssp-act__pill--stale.is-active   { border-color: #b8860b; background: #fffaf0; }
+
+.wssp-act__pill-number {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.wssp-act__pill-label {
+    color: #50575e;
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+.wssp-act__pill--never  .wssp-act__pill-number { color: #b32d2e; }
+.wssp-act__pill--recent .wssp-act__pill-number { color: #2e7d32; }
+.wssp-act__pill--stale  .wssp-act__pill-number { color: #b8860b; }
+
+/* ═══ Filter form ═══ */
+.wssp-act__filters {
+    align-items: end;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    margin: 16px 0;
+    padding: 14px 16px;
+}
+
+.wssp-act__filter {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.wssp-act__filter > span {
+    color: #50575e;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.wssp-act__filter--search {
+    flex: 1 1 240px;
+}
+
+.wssp-act__filter--search input[type="search"] {
+    width: 100%;
+}
+
+.wssp-act__filter-actions {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+}
+
+/* ═══ Table ═══ */
+.wssp-act__table th,
+.wssp-act__table td {
+    vertical-align: top;
+    text-align: left;
+}
+
+.wssp-act__col-user      { width: 22%; }
+.wssp-act__col-sessions  { width: 22%; }
+.wssp-act__col-role      { width: 12%; }
+.wssp-act__col-last      { width: 18%; }
+.wssp-act__col-days      { width: 12%; text-align: right; }
+.wssp-act__col-total     { width: 14%; text-align: right; }
+
+.wssp-act__user-email a {
+    color: #50575e;
+    text-decoration: none;
+}
+
+.wssp-act__user-email a:hover {
+    color: #2271b1;
+    text-decoration: underline;
+}
+
+/* Per-session "tag" pills inside the Sessions column. Click → audit log. */
+.wssp-act__session-tag {
+    background: #f0f0f1;
+    border-radius: 3px;
+    color: #1d2327;
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    margin: 0 4px 4px 0;
+    padding: 2px 8px;
+    text-decoration: none;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.wssp-act__session-tag:hover,
+.wssp-act__session-tag:focus {
+    background: #2271b1;
+    color: #fff;
+}
+
+.wssp-act__no-sessions {
+    color: #a7aaad;
+}
+
+/* Row state — purely cosmetic cues; no information lives only in color. */
+.wssp-act__row--never td {
+    background: #fdf4f4;
+}
+
+.wssp-act__row--never td:first-child {
+    border-left: 3px solid #b32d2e;
+}
+
+.wssp-act__row--stale td:first-child {
+    border-left: 3px solid #b8860b;
+}
+
+.wssp-act__row--recent td:first-child {
+    border-left: 3px solid #2e7d32;
+}
+
+.wssp-act__col-last small {
+    color: #757575;
+    font-style: italic;
+}
+
+.wssp-act__count {
+    color: #646970;
+    font-size: 13px;
+    margin-top: 12px;
+}
+
+.wssp-act__empty {
+    color: #50575e;
+    font-style: italic;
+    padding: 24px;
+    text-align: center;
+}
+
+/* ─── New pill: No Portal Account ─── */
+.wssp-act__pill--no-account.is-active   { border-color: #6b3eaf; background: #f5f0fb; }
+.wssp-act__pill--no-account .wssp-act__pill-number { color: #6b3eaf; }
+ 
+/* ─── Row: unregistered contact ─── */
+.wssp-act__row--no-account td {
+    background: #fafafa;
+    color: #50575e;
+    font-style: italic;
+}
+ 
+.wssp-act__row--no-account td:first-child {
+    border-left: 3px solid #6b3eaf;
+}
+ 
+/* The strong (display name) inside an unregistered row stays italic
+   from the inherited rule, but we keep its weight visible. */
+.wssp-act__row--no-account td strong {
+    color: #1d2327;
+    font-weight: 600;
+}
+ 
+/* Inline "No Portal Account" badge next to the contact's name. */
+.wssp-act__no-account-badge {
+    background: #f5f0fb;
+    border: 1px solid #d6c6ee;
+    border-radius: 3px;
+    color: #6b3eaf;
+    display: inline-block;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin-left: 8px;
+    padding: 2px 6px;
+    text-transform: uppercase;
+    vertical-align: middle;
+}
+ 
+/* Plain (non-link) session tag for unregistered contacts.
+   Visually identical to a link tag but no hover/click affordance. */
+.wssp-act__session-tag--plain {
+    background: #f0f0f1;
+    color: #50575e;
+    cursor: default;
+}
+ 
+.wssp-act__session-tag--plain:hover,
+.wssp-act__session-tag--plain:focus {
+    background: #f0f0f1;       /* don't darken on hover — it isn't clickable */
+    color: #50575e;
+}
+ 
+/* Muted dash markers in cells that don't apply to unregistered rows. */
+.wssp-act__muted {
+    color: #a7aaad;
+    font-style: normal;
+}
+
+/* ─── Narrow viewport ─── */
+@media (max-width: 900px) {
+    .wssp-act__pill {
+        min-width: 110px;
+        padding: 10px 12px;
+    }
+
+    .wssp-act__pill-number {
+        font-size: 18px;
+    }
+
+    .wssp-act__filters {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .wssp-act__filter,
+    .wssp-act__filter--search {
+        width: 100%;
+    }
+
+    .wssp-act__filter-actions {
+        margin-left: 0;
+        justify-content: flex-end;
+    }
+}
+
+/**
+ * Vendor Report — styles to APPEND to admin/css/reports.css.
+ *
+ * Scoped under .wssp-vrp so it can't collide with any existing
+ * report styles. Uses a card-per-session layout (rather than a
+ * single big table) because the per-session field list varies in
+ * length and reads better as discrete blocks.
+ */
+
+/* ─── Top-of-page type tag ─── */
+.wssp-vrp__type-tag {
+    background: #f0f0f1;
+    border-radius: 4px;
+    color: #1d2327;
+    display: inline-block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-left: 8px;
+    padding: 4px 10px;
+    vertical-align: middle;
+}
+
+.wssp-vrp__type-tag--av    { background: #e3f2fd; color: #0d47a1; }
+.wssp-vrp__type-tag--print { background: #f5f0fb; color: #6b3eaf; }
+.wssp-vrp__type-tag--hotel { background: #fff8e1; color: #b8860b; }
+
+/* ─── Filters bar (mirrors .wssp-act__filters layout) ─── */
+.wssp-vrp__filters {
+    align-items: end;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    margin: 16px 0;
+    padding: 14px 16px;
+}
+
+.wssp-vrp__filter {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.wssp-vrp__filter > span {
+    color: #50575e;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.wssp-vrp__filter--search { flex: 1 1 240px; }
+.wssp-vrp__filter--search input[type="search"] { width: 100%; }
+
+.wssp-vrp__filter-actions {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.wssp-vrp__count {
+    color: #646970;
+    font-size: 13px;
+    margin: 16px 0 8px;
+}
+
+/* ─── Per-session card ─── */
+.wssp-vrp__session {
+    margin-bottom: 18px;
+    padding: 18px 20px;
+}
+
+.wssp-vrp__session-header {
+    align-items: center;
+    border-bottom: 1px solid #f0f0f1;
+    display: grid;
+    gap: 16px;
+    grid-template-columns: 110px 1fr auto;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+}
+
+.wssp-vrp__session-id {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wssp-vrp__session-code {
+    color: #1d2327;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.wssp-vrp__session-status {
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 2px 7px;
+    text-transform: uppercase;
+}
+
+.wssp-vrp__session-status--on_track             { background: #e7f3eb; color: #0f7b3d; }
+.wssp-vrp__session-status--attention_needed     { background: #fdf4f4; color: #b32d2e; }
+.wssp-vrp__session-status--submitted_for_review { background: #e3f2fd; color: #0d47a1; }
+.wssp-vrp__session-status--completed            { background: #f0f0f1; color: #50575e; }
+
+.wssp-vrp__session-title {
+    color: #1d2327;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 0 0 4px;
+}
+
+.wssp-vrp__session-sponsor {
+    color: #50575e;
+    font-size: 13px;
+}
+
+.wssp-vrp__session-when {
+    color: #50575e;
+    font-size: 13px;
+    text-align: right;
+}
+
+.wssp-vrp__session-when-date {
+    color: #1d2327;
+    font-weight: 600;
+}
+
+.wssp-vrp__session-when-room {
+    margin-top: 2px;
+}
+
+/* ─── Field grid ─── */
+.wssp-vrp__fields {
+    display: grid;
+    gap: 12px 18px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    margin-bottom: 14px;
+}
+
+.wssp-vrp__field {
+    border-left: 3px solid #e0e0e0;
+    padding-left: 10px;
+}
+
+.wssp-vrp__field-label {
+    color: #50575e;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.wssp-vrp__field-value {
+    color: #1d2327;
+    font-size: 14px;
+    margin-top: 2px;
+}
+
+.wssp-vrp__field-value.is-empty {
+    color: #a7aaad;
+    font-style: italic;
+}
+
+/* ─── Files block ─── */
+.wssp-vrp__files {
+    background: #fafafa;
+    border-radius: 4px;
+    margin-top: 4px;
+    padding: 12px 16px;
+}
+
+.wssp-vrp__files-heading {
+    color: #50575e;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    margin: 0 0 8px;
+    text-transform: uppercase;
+}
+
+.wssp-vrp__files-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.wssp-vrp__file {
+    align-items: center;
+    border-bottom: 1px solid #f0f0f1;
+    display: flex;
+    gap: 12px;
+    padding: 8px 0;
+}
+
+.wssp-vrp__file:last-child { border-bottom: none; }
+
+.wssp-vrp__file.is-missing { color: #a7aaad; }
+
+.wssp-vrp__file-type {
+    color: #1d2327;
+    flex: 0 0 200px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.wssp-vrp__file.is-missing .wssp-vrp__file-type {
+    color: #757575;
+    font-weight: 500;
+}
+
+.wssp-vrp__file-status {
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+}
+
+.wssp-vrp__file-status--approved                            { background: #e7f3eb; color: #0f7b3d; }
+.wssp-vrp__file-status--pending,
+.wssp-vrp__file-status--pending-not-reviewed                { background: #fef3c7; color: #b8860b; }
+.wssp-vrp__file-status--reviewed-changes-required-(see-notes),
+.wssp-vrp__file-status--changes-required                    { background: #fde2e2; color: #b32d2e; }
+
+.wssp-vrp__file-version {
+    color: #50575e;
+    font-weight: 400;
+    margin-left: 4px;
+}
+
+.wssp-vrp__file-link {
+    color: #2271b1;
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.wssp-vrp__file-link:hover { text-decoration: underline; }
+
+.wssp-vrp__file-missing {
+    color: #a7aaad;
+    font-size: 12px;
+    font-style: italic;
+}
+
+/* ─── Empty state ─── */
+.wssp-vrp__empty {
+    color: #50575e;
+    font-style: italic;
+    padding: 24px;
+    text-align: center;
+}
+
+/* ─── Narrow viewport ─── */
+@media (max-width: 900px) {
+    .wssp-vrp__session-header {
+        grid-template-columns: 1fr;
+    }
+
+    .wssp-vrp__session-when {
+        text-align: left;
+    }
+
+    .wssp-vrp__filters {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .wssp-vrp__filter,
+    .wssp-vrp__filter--search {
+        width: 100%;
+    }
+
+    .wssp-vrp__filter-actions {
+        margin-left: 0;
+        justify-content: flex-end;
+    }
+
+    .wssp-vrp__file {
+        flex-wrap: wrap;
+    }
+
+    .wssp-vrp__file-type {
+        flex: 1 1 100%;
+    }
+}

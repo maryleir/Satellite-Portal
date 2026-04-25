@@ -159,6 +159,12 @@ add_action( 'plugins_loaded', function () {
     // session linkage (30) and audit logging (35).
     new WSSP_Contacts_Sync( $access, $formidable, $audit );
     
+    // Login tracker: hooks wp_login and writes a per-session audit row
+    // so the existing audit log report can filter on action = 'login'.
+    new WSSP_Login_Tracker( $access, $audit );
+    
+    new WSSP_Vendor_Access();
+    
     new WSSP_REST_Meeting_Planners( $access );
 
 

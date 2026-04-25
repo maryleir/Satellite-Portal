@@ -1,0 +1,333 @@
+/**
+ * WSSP Session Status Report — print + screen styles.
+ *
+ * Used only by the session-status-report.php view. Loaded standalone (not
+ * stacked on top of portal.css) so the report has a clean, print-friendly
+ * baseline rather than fighting against the portal's UI shell.
+ *
+ * Strategy:
+ *   - Default rules render the report cleanly on screen.
+ *   - @media print rules tune for paper: hide actions, fix page breaks,
+ *     soften background colors that waste toner.
+ */
+
+/* ─── Reset just enough to keep this self-contained ─── */
+.wssp-report-body {
+    background: #f5f7fa;
+    color: #202124;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 0;
+    padding: 24px 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.wssp-report {
+    background: #ffffff;
+    margin: 0 auto;
+    max-width: 8.25in;        /* matches US Letter content width */
+    padding: 0.6in 0.65in;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* ─── Header ─── */
+.wssp-report__header {
+    border-bottom: 2px solid #1a56a0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+}
+
+.wssp-report__site {
+    color: #5f6368;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+/* The brand mark "WORLDSymposium" renders as WORLD<i>Symposium</i>.
+   The header and footer both apply uppercase + letter-spacing for the
+   site label, but the italic Symposium half needs to stay mixed-case
+   and tightly set so the brand reads correctly. */
+.wssp-report__site i,
+.wssp-report__footer i {
+    font-style: italic;
+    letter-spacing: normal;
+    text-transform: none;
+}
+
+.wssp-report__title {
+    color: #1a56a0;
+    font-size: 22px;
+    font-weight: 700;
+    margin: 4px 0 0;
+}
+
+.wssp-report__meta {
+    color: #5f6368;
+    font-size: 12px;
+    text-align: right;
+}
+
+.wssp-report__meta strong {
+    color: #202124;
+    font-weight: 600;
+}
+
+/* ─── Print button ─── */
+.wssp-report__actions {
+    align-items: center;
+    background: #f0f4f8;
+    border-radius: 4px;
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 10px 14px;
+}
+
+.wssp-report__print-btn {
+    background: #1a56a0;
+    border: none;
+    border-radius: 3px;
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 14px;
+}
+
+.wssp-report__print-btn:hover {
+    background: #144078;
+}
+
+.wssp-report__hint {
+    color: #5f6368;
+    font-size: 12px;
+}
+
+/* ─── Section titles ─── */
+.wssp-report__section-title {
+    color: #1a56a0;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    margin: 0 0 12px;
+    text-transform: uppercase;
+}
+
+/* ─── Summary stats ─── */
+.wssp-report__summary {
+    margin-bottom: 28px;
+}
+
+.wssp-report__stat-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.wssp-report__stat {
+    background: #f5f7fa;
+    border: 1px solid #e0e4e8;
+    border-radius: 4px;
+    padding: 12px 16px;
+}
+
+.wssp-report__stat--warn {
+    background: #fef3c7;
+    border-color: #fde68a;
+}
+
+.wssp-report__stat-value {
+    color: #202124;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+.wssp-report__stat-of {
+    color: #5f6368;
+    font-size: 14px;
+    font-weight: 400;
+}
+
+.wssp-report__stat-label {
+    color: #5f6368;
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+/* ─── Phase blocks ─── */
+.wssp-report__phase {
+    margin-bottom: 22px;
+}
+
+.wssp-report__phase-header {
+    align-items: center;
+    border-bottom: 1px solid #cccccc;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+}
+
+.wssp-report__phase-title {
+    color: #202124;
+    font-size: 16px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.wssp-report__phase-badge {
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 3px 8px;
+    text-transform: uppercase;
+}
+
+.wssp-report__phase-badge--completed {
+    background: #d9f2e3;
+    color: #0f7b3d;
+}
+
+.wssp-report__phase-badge--overdue {
+    background: #fde2e2;
+    color: #b42525;
+}
+
+/* ─── Task table ─── */
+.wssp-report__task-table {
+    border-collapse: collapse;
+    font-size: 12.5px;
+    table-layout: fixed;
+    width: 100%;
+}
+
+.wssp-report__task-table th {
+    background: #f5f7fa;
+    border-bottom: 1px solid #cccccc;
+    color: #5f6368;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 6px 8px;
+    text-align: left;
+    text-transform: uppercase;
+}
+
+.wssp-report__task-table td {
+    border-bottom: 1px solid #eaecef;
+    padding: 8px;
+    vertical-align: top;
+}
+
+.wssp-report__task-table .col-task     { width: 38%; }
+.wssp-report__task-table .col-deadline { width: 14%; }
+.wssp-report__task-table .col-status   { width: 18%; }
+.wssp-report__task-table .col-extra    { width: 30%; }
+
+/* ─── Status pills ─── */
+.wssp-report__status {
+    border-radius: 3px;
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 3px 8px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.wssp-report__status--complete    { background: #d9f2e3; color: #0f7b3d; }
+.wssp-report__status--submitted   { background: #d5e8f0; color: #1a56a0; }
+.wssp-report__status--overdue     { background: #fde2e2; color: #b42525; }
+.wssp-report__status--in-progress { background: #fef3c7; color: #92651a; }
+.wssp-report__status--not-started { background: #eaecef; color: #5f6368; }
+.wssp-report__status--info        { background: #f0e7fb; color: #6b3eaf; }
+
+/* Slight row tinting for at-a-glance scanning */
+.wssp-report__task--overdue   td { background: #fff8f8; }
+.wssp-report__task--complete  td { color: #5f6368; }
+
+/* ─── Footer ─── */
+.wssp-report__footer {
+    border-top: 1px solid #cccccc;
+    color: #5f6368;
+    display: flex;
+    font-size: 11px;
+    justify-content: space-between;
+    margin-top: 32px;
+    padding-top: 10px;
+}
+
+/*
+ * ─── Print rules ───────────────────────────────────────────
+ * Strip the on-screen chrome and tune for paper.
+ */
+@media print {
+
+    /* Page setup — half-inch margins suit dense tables */
+    @page {
+        margin: 0.5in;
+        size: letter;
+    }
+
+    .wssp-report-body {
+        background: #ffffff;
+        padding: 0;
+    }
+
+    .wssp-report {
+        box-shadow: none;
+        max-width: none;
+        padding: 0;
+    }
+
+    /* Hide things that don't belong on paper */
+    .wssp-report__actions {
+        display: none;
+    }
+
+    /* Phases shouldn't split awkwardly across pages */
+    .wssp-report__phase {
+        page-break-inside: avoid;
+    }
+
+    /* But if a phase IS too long for a page, at least keep its header
+       attached to its first task */
+    .wssp-report__phase-header,
+    .wssp-report__task-table thead {
+        page-break-after: avoid;
+    }
+
+    .wssp-report__task-table tr {
+        page-break-inside: avoid;
+    }
+
+    /* Re-enable background colors so status pills and warning rows print
+       (default browser behavior is to strip backgrounds to save ink) */
+    .wssp-report__status,
+    .wssp-report__phase-badge,
+    .wssp-report__stat--warn,
+    .wssp-report__task--overdue td,
+    .wssp-report__task-table th {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    /* Use a slightly smaller body size so more fits per page */
+    body, .wssp-report-body {
+        font-size: 11.5px;
+    }
+
+    .wssp-report__title {
+        font-size: 18px;
+    }
+}

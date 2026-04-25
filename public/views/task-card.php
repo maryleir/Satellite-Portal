@@ -382,7 +382,7 @@ if ( $is_done ) {
                         View Response
                     </button>
                 <?php endif; ?>
-            <?php elseif ( $form_key && ! $is_info && ! $is_done ) : ?>
+            <?php elseif ( $form_key && ! $is_info && ! $is_done && ! $needs_ack ) : ?>
                 <!-- Active task: editable form -->
                 <button class="wssp-btn wssp-btn--form wssp-open-form-drawer"
                         data-form-key="<?php echo esc_attr( $form_key ); ?>"

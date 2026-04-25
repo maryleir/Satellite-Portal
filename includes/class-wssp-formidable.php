@@ -25,7 +25,7 @@ class WSSP_Formidable {
      * Only keeping forms that are still actively used.
      */
     const FORM_SATELLITE_SESSION_DATA   = 'wssp-sat-session-data';     // Core consolidated form (replaced multiple older forms)
-    const FORM_SATELLITE_MEETING_PLANNER = 'wssp-sat-meeting-planner'; // Supports multiple planners
+    const FORM_SATELLITE_MEETING_PLANNER = 'wssp-sat-meeting-planners'; // Supports multiple planners
     const FORM_SATELLITE_MATERIAL_UPLOAD = 'wssp-sat-material-upload'; // Supports multiple file uploads
 
     /**
@@ -1156,6 +1156,88 @@ class WSSP_Formidable {
             'contacts' => implode( ', ', $names ),
             'emails'   => implode( ', ', $emails ),
         );
+    }
+    
+    /**
+     * Get structured contact rows for a session's logistics-contacts repeater.
+     *
+     * Distinct from get_contacts_snapshot(), which returns flattened strings
+     * for Smartsheet. This returns one record per contact, with their name,
+     * email, and whether their email maps to a WP user account.
+     *
+     * Designed for the Sponsor Activity report so it can show contacts who
+     * are listed in the repeater but cannot log in (no WP account).
+     *
+     * Duplicate emails within the repeater collapse to one entry (first
+     * occurrence wins, preserving the order Formidable returned).
+     *
+     * @param string $session_key The 8-char session_key (NOT session id).
+     * @return array<string, array{
+     *     name:        string,
+     *     email:       string,
+     *     user_id:     int,
+     *     has_account: bool
+     * }>  Keyed by lowercase email.
+     */
+    public function get_session_contacts_detailed( $session_key ) {
+        if ( empty( $session_key ) || ! class_exists( 'FrmField' ) || ! class_exists( 'FrmEntryMeta' ) ) {
+            return array();
+        }
+ 
+        /*
+         * Resolve session_key → parent entry_id by looking up the session_key
+         * meta in Formidable. Mirrors how link_session_data_entry() does it.
+         */
+        $session_field_id = FrmField::get_id_by_key( self::FIELD_SESSION_KEY );
+        if ( ! $session_field_id ) {
+            return array();
+        }
+        $entry_ids = FrmEntryMeta::getEntryIds( array(
+            'field_id'   => $session_field_id,
+            'meta_value' => $session_key,
+        ) );
+        if ( empty( $entry_ids ) ) {
+            return array();
+        }
+        $parent_entry_id = (int) reset( $entry_ids );
+ 
+        $name_field_id  = FrmField::get_id_by_key( self::CONTACTS_NAME_FIELD_KEY );
+        $email_field_id = FrmField::get_id_by_key( self::CONTACTS_EMAIL_FIELD_KEY );
+        if ( ! $name_field_id || ! $email_field_id ) {
+            return array();
+        }
+ 
+        $child_ids = $this->get_contacts_child_entry_ids( $parent_entry_id );
+        if ( empty( $child_ids ) ) {
+            return array();
+        }
+ 
+        $out = array();
+        foreach ( $child_ids as $child_id ) {
+            $name  = trim( (string) FrmEntryMeta::get_entry_meta_by_field( $child_id, $name_field_id, true ) );
+            $email = trim( (string) FrmEntryMeta::get_entry_meta_by_field( $child_id, $email_field_id, true ) );
+ 
+            if ( $email === '' || ! is_email( $email ) ) {
+                continue;
+            }
+ 
+            $key = strtolower( $email );
+            if ( isset( $out[ $key ] ) ) {
+                // First occurrence wins. Logistics added them in this order;
+                // we preserve that even if Smartsheet sync re-pulls later.
+                continue;
+            }
+ 
+            $user = get_user_by( 'email', $email );
+            $out[ $key ] = array(
+                'name'        => $name,
+                'email'       => $email,
+                'user_id'     => $user ? (int) $user->ID : 0,
+                'has_account' => (bool) $user,
+            );
+        }
+ 
+        return $out;
     }
 
     /**

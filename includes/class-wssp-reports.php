@@ -50,6 +50,10 @@ class WSSP_Reports {
         add_action( 'admin_menu', array( $this, 'register_menus' ), 20 );
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
         add_action( 'admin_init', array( $this, 'maybe_handle_file_queue_export' ) );
+        add_action( 'admin_init', array( $this, 'maybe_handle_activity_export' ) );
+        add_action( 'admin_init', array( $this, 'maybe_handle_vendor_report_export' ) );
+
+
     }
 
     /* ───────────────────────────────────────────
@@ -121,6 +125,16 @@ class WSSP_Reports {
             'wssp-report-audit',
             array( $this, 'render_audit_log' )
         );
+        
+        add_submenu_page(
+            'wssp-dashboard',
+            'Sponsor Activity',
+            'Sponsor Activity',
+            'edit_posts',
+            'wssp-report-activity',
+            array( $this, 'render_sponsor_activity' )
+        );
+
 
         add_submenu_page(
             'wssp-dashboard',
@@ -139,6 +153,16 @@ class WSSP_Reports {
             'wssp-report-files',
             array( $this, 'render_file_review_queue' )
         );
+        
+        add_submenu_page(
+            'wssp-dashboard',
+            'Vendor Reports',
+            'Vendor Reports',
+            WSSP_Vendor_Access::CAP_VIEW_REPORT,
+            'wssp-report-vendors',
+            array( $this, 'render_vendor_report' )
+        );
+
     }
 
     /* ═══════════════════════════════════════════
@@ -683,6 +707,7 @@ class WSSP_Reports {
 
     public static function action_labels() {
         return array(
+            'login'                => 'Sponsor Login',
             'field_edit'           => 'Field Edit',
             'form_submitted'       => 'Form Submitted',
             'status_change'        => 'Status Change',
@@ -740,6 +765,7 @@ class WSSP_Reports {
             case 'session_updated':  return 'updated session details';
             case 'session_meta_updated': return 'updated session configuration';
             case 'team_change':      return esc_html( $entry['new_value'] ?? $entry['old_value'] ?? 'modified team' );
+            case 'login':            return 'logged in';
             default:                 return esc_html( $action_labels[ $action ] ?? ucwords( str_replace( '_', ' ', $action ) ) );
         }
     }
@@ -1194,4 +1220,813 @@ class WSSP_Reports {
         if ( strpos( $status, 'Pending' )          !== false ) return 'Pending Review';
         return $status;
     }
+    
+    /* ═══════════════════════════════════════════
+     * REPORT — Sponsor Activity
+     * Cross-session roster of every user assigned
+     * to a session, with login engagement metrics
+     * derived from the audit log.
+     * ═══════════════════════════════════════════ */
+ 
+    /** Threshold (days) for "recently active" pill / row highlight. */
+    const ACTIVITY_RECENT_DAYS = 7;
+ 
+    /** Threshold (days) past which a user counts as "stale". */
+    const ACTIVITY_STALE_DAYS  = 30;
+ 
+    /**
+     * Render the Sponsor Activity admin page.
+     */
+    public function render_sponsor_activity() {
+        global $wpdb;
+ 
+        $filters = $this->parse_activity_filters();
+        $rows    = $this->load_activity_rows( $filters );
+ 
+        // Counts run against the *unfiltered-by-state* set so the pill
+        // numbers stay stable as the user clicks them.
+        $filters_for_counts          = $filters;
+        $filters_for_counts['state'] = '';
+        $rows_for_counts             = $this->load_activity_rows( $filters_for_counts );
+        $counts                      = $this->compute_activity_counts( $rows_for_counts );
+ 
+        // Decorate rows with audit-log links and computed flags now (so the
+        // view stays declarative).
+        $rows = $this->decorate_activity_rows( $rows );
+ 
+        // Session dropdown options (full list).
+        $sessions = $wpdb->get_results(
+            "SELECT id, session_code, short_name
+             FROM {$this->sessions_table}
+             ORDER BY session_code ASC",
+            ARRAY_A
+        );
+ 
+        // Role dropdown options (distinct from session_users).
+        $roles = $wpdb->get_col(
+            "SELECT DISTINCT role
+             FROM {$wpdb->prefix}wssp_session_users
+             WHERE role IS NOT NULL AND role <> ''
+             ORDER BY role ASC"
+        );
+ 
+        $base_url   = admin_url( 'admin.php?page=wssp-report-activity' );
+        $export_url = add_query_arg( array_merge( $filters, array( 'export' => 'csv' ) ), $base_url );
+ 
+        include WSSP_PLUGIN_DIR . 'admin/views/report-sponsor-activity.php';
+    }
+ 
+    /**
+     * Read and sanitize querystring filters for the activity report.
+     */
+    private function parse_activity_filters() {
+        $state = isset( $_GET['state'] ) ? sanitize_key( wp_unslash( $_GET['state'] ) ) : '';
+        if ( ! in_array( $state, array( '', 'never', 'recent', 'stale', 'no_account' ), true ) ) {
+            $state = '';
+        }
+        return array(
+            'state'      => $state,
+            'session_id' => isset( $_GET['session_id'] ) ? absint( $_GET['session_id'] ) : 0,
+            'role'       => isset( $_GET['role'] )       ? sanitize_key( $_GET['role'] ) : '',
+            'search'     => isset( $_GET['search'] )     ? sanitize_text_field( wp_unslash( $_GET['search'] ) ) : '',
+        );
+    }
+ 
+    /**
+     * Load the activity dataset.
+     *
+     * Strategy:
+     *   - Aggregate audit-log login events in a subquery, keyed by user_id.
+     *   - LEFT JOIN that aggregate against wssp_session_users so users who
+     *     have never logged in still appear.
+     *   - GROUP_CONCAT the session list per user, ordered by session_code.
+     *   - Apply state filter ("never logged in" / "recent" / "stale") in
+     *     PHP after the rows are loaded — the SQL stays simple and the
+     *     thresholds remain visible at the call site.
+     *
+     * @param array $filters
+     * @return array
+     */
+    /**
+     * Load the activity dataset.
+     *
+     * Returns rows in two flavors:
+     *   - kind = 'registered'   — has a WP user account; full login metrics.
+     *   - kind = 'unregistered' — listed in a session's contacts repeater
+     *                              but no WP user matches their email.
+     *
+     * Sort order: never-logged-in registered users first (most actionable),
+     * then unregistered contacts (next-most actionable), then most-recent
+     * login descending, with display-name as the tiebreaker.
+     *
+     * @param array $filters
+     * @return array
+     */
+    private function load_activity_rows( $filters ) {
+        global $wpdb;
+ 
+        /* ─── 1. Registered users (existing SQL query) ─── */
+ 
+        $audit_table    = $wpdb->prefix . 'wssp_audit_log';
+        $session_users  = $wpdb->prefix . 'wssp_session_users';
+        $sessions_table = $this->sessions_table;
+        $users_table    = $wpdb->users;
+ 
+        $where  = array();
+        $values = array();
+ 
+        if ( ! empty( $filters['session_id'] ) ) {
+            $where[]  = "EXISTS (
+                           SELECT 1 FROM {$session_users} su2
+                           WHERE su2.user_id = u.ID
+                             AND su2.session_id = %d )";
+            $values[] = (int) $filters['session_id'];
+        }
+ 
+        if ( ! empty( $filters['role'] ) ) {
+            $where[]  = "EXISTS (
+                           SELECT 1 FROM {$session_users} su3
+                           WHERE su3.user_id = u.ID
+                             AND su3.role = %s )";
+            $values[] = $filters['role'];
+        }
+ 
+        if ( ! empty( $filters['search'] ) ) {
+            $like     = '%' . $wpdb->esc_like( $filters['search'] ) . '%';
+            $where[]  = '( u.display_name LIKE %s OR u.user_email LIKE %s OR u.user_login LIKE %s )';
+            $values[] = $like;
+            $values[] = $like;
+            $values[] = $like;
+        }
+ 
+        $where_sql = $where ? ( ' AND ' . implode( ' AND ', $where ) ) : '';
+ 
+        $sql = "
+            SELECT
+                u.ID                                 AS user_id,
+                u.display_name                       AS display_name,
+                u.user_email                         AS user_email,
+                /* MAX returns the most senior role: roles sort
+                   logistics, sponsor_collaborator, sponsor_primary
+                   alphabetically, so MAX surfaces the most senior. */
+                MAX( su.role )                       AS role,
+                GROUP_CONCAT( DISTINCT su.session_id ORDER BY s.session_code SEPARATOR ',' )
+                                                     AS session_ids,
+                GROUP_CONCAT( DISTINCT s.session_code ORDER BY s.session_code SEPARATOR ',' )
+                                                     AS session_codes,
+                MAX( al.created_at )                 AS last_login,
+                COUNT( DISTINCT DATE( al.created_at ) )
+                                                     AS login_days,
+                COUNT( al.id )                       AS total_logins
+            FROM {$session_users} su
+            INNER JOIN {$users_table}    u ON u.ID = su.user_id
+            INNER JOIN {$sessions_table} s ON s.id = su.session_id
+            LEFT JOIN {$audit_table} al
+                   ON al.user_id    = su.user_id
+                  AND al.session_id = su.session_id
+                  AND al.action     = 'login'
+            WHERE 1=1
+                  {$where_sql}
+            GROUP BY u.ID
+            ORDER BY
+                CASE WHEN MAX( al.created_at ) IS NULL THEN 0 ELSE 1 END,
+                MAX( al.created_at ) DESC,
+                u.display_name ASC
+        ";
+ 
+        if ( $values ) {
+            $sql = $wpdb->prepare( $sql, ...$values );
+        }
+ 
+        $registered = $wpdb->get_results( $sql, ARRAY_A );
+        foreach ( $registered as &$r ) {
+            $r['kind'] = 'registered';
+        }
+        unset( $r );
+ 
+        /* ─── 2. Unregistered contacts from session repeaters ─── */
+ 
+        $unregistered = $this->load_unregistered_contacts( $filters, $registered );
+ 
+        /* ─── 3. Combine and apply state filter ─── */
+ 
+        $rows = array_merge( $registered, $unregistered );
+ 
+        if ( ! empty( $filters['state'] ) ) {
+            $now           = time();
+            $recent_cutoff = $now - ( self::ACTIVITY_RECENT_DAYS * DAY_IN_SECONDS );
+            $stale_cutoff  = $now - ( self::ACTIVITY_STALE_DAYS  * DAY_IN_SECONDS );
+ 
+            $rows = array_values( array_filter( $rows, function ( $r ) use ( $filters, $recent_cutoff, $stale_cutoff ) {
+                $kind = $r['kind'] ?? 'registered';
+                if ( $filters['state'] === 'no_account' ) {
+                    return $kind === 'unregistered';
+                }
+                // Login-state filters apply only to registered users.
+                if ( $kind !== 'registered' ) {
+                    return false;
+                }
+                $last = $r['last_login'] ? strtotime( $r['last_login'] . ' UTC' ) : null;
+                switch ( $filters['state'] ) {
+                    case 'never':  return ! $last;
+                    case 'recent': return $last && $last >= $recent_cutoff;
+                    case 'stale':  return ! $last || $last < $stale_cutoff;
+                }
+                return true;
+            } ) );
+        }
+ 
+        return $rows;
+    }
+ 
+     /**
+     * Pull unregistered contacts from session repeaters.
+     *
+     * Walks each session (or the one filtered to), reads its
+     * logistics-contacts repeater via WSSP_Formidable, and returns rows
+     * for any contact whose email does NOT correspond to a WP user.
+     *
+     * Emails that already appear in $registered_rows are excluded — those
+     * users are already represented as registered rows and merging them
+     * twice would be confusing.
+     *
+     * Multi-session unregistered contacts (same email in two sessions'
+     * repeaters) collapse to a single row with both session codes listed.
+     *
+     * @param array $filters         Active filters (session/role/search).
+     * @param array $registered_rows Already-loaded registered rows; used to
+     *                               de-duplicate by email.
+     * @return array Rows shaped like the registered rows, plus kind = 'unregistered'.
+     */
+    private function load_unregistered_contacts( $filters, $registered_rows ) {
+        global $wpdb;
+ 
+        /*
+         * Build the working set of sessions to scan. If logistics filtered
+         * by session, we only scan that one. Otherwise scan all sessions.
+         * Note: the role filter and search filter intentionally don't
+         * pre-filter the session list — they're applied to contacts
+         * AFTER they're collected (search) or are inapplicable to
+         * unregistered contacts (role, since they have no role).
+         */
+        if ( ! empty( $filters['session_id'] ) ) {
+            $sessions = $wpdb->get_results( $wpdb->prepare(
+                "SELECT id, session_key, session_code FROM {$this->sessions_table} WHERE id = %d",
+                (int) $filters['session_id']
+            ), ARRAY_A );
+        } else {
+            $sessions = $wpdb->get_results(
+                "SELECT id, session_key, session_code FROM {$this->sessions_table} ORDER BY session_code ASC",
+                ARRAY_A
+            );
+        }
+ 
+        if ( empty( $sessions ) ) {
+            return array();
+        }
+ 
+        /*
+         * Index registered rows by lowercase email so we can subtract them
+         * from the unregistered set. A user appearing both in wssp_session_users
+         * AND in a contacts repeater is a registered user — only show once.
+         */
+        $registered_emails = array();
+        foreach ( $registered_rows as $r ) {
+            if ( ! empty( $r['user_email'] ) ) {
+                $registered_emails[ strtolower( $r['user_email'] ) ] = true;
+            }
+        }
+ 
+        /*
+         * Apply role filter: unregistered contacts have no role, so if a
+         * role filter is active, they're all excluded by definition.
+         */
+        if ( ! empty( $filters['role'] ) ) {
+            return array();
+        }
+ 
+        /*
+         * Walk each session's repeater. Collapse same-email-across-sessions
+         * to a single record with multiple session entries.
+         */
+        $bucket = array(); // keyed by lowercase email
+ 
+        foreach ( $sessions as $s ) {
+            $contacts = $this->formidable->get_session_contacts_detailed( $s['session_key'] );
+            if ( empty( $contacts ) ) {
+                continue;
+            }
+ 
+            foreach ( $contacts as $email_lc => $contact ) {
+                // Skip ones that have a real WP user — they're in registered_rows.
+                if ( ! empty( $contact['has_account'] ) ) {
+                    continue;
+                }
+                // Belt-and-suspenders: skip if a registered row uses this email
+                // but the contacts walk somehow missed has_account. This handles
+                // edge cases like role mismatches between sources.
+                if ( isset( $registered_emails[ $email_lc ] ) ) {
+                    continue;
+                }
+ 
+                if ( ! isset( $bucket[ $email_lc ] ) ) {
+                    $bucket[ $email_lc ] = array(
+                        'kind'         => 'unregistered',
+                        'user_id'      => 0,
+                        'display_name' => $contact['name'] ?: $contact['email'],
+                        'user_email'   => $contact['email'],
+                        'role'         => '',
+                        'session_ids'  => array(),
+                        'session_codes'=> array(),
+                        // Login-related fields stay null/zero so the view's
+                        // existing "—" treatment Just Works for these cells.
+                        'last_login'   => null,
+                        'login_days'   => 0,
+                        'total_logins' => 0,
+                    );
+                }
+                $bucket[ $email_lc ]['session_ids'][]   = (int) $s['id'];
+                $bucket[ $email_lc ]['session_codes'][] = $s['session_code'];
+            }
+        }
+ 
+        if ( empty( $bucket ) ) {
+            return array();
+        }
+ 
+        /*
+         * Apply the search filter (substring match on name or email).
+         * Mirrors the LIKE behavior on the registered side.
+         */
+        if ( ! empty( $filters['search'] ) ) {
+            $needle = mb_strtolower( $filters['search'] );
+            $bucket = array_filter( $bucket, function ( $r ) use ( $needle ) {
+                return false !== mb_stripos( (string) $r['display_name'], $needle )
+                    || false !== mb_stripos( (string) $r['user_email'],   $needle );
+            } );
+        }
+ 
+        /*
+         * Convert session arrays to comma-joined strings to match the
+         * shape that decorate_activity_rows() expects (its parser uses
+         * explode(',', …) on these fields).
+         */
+        foreach ( $bucket as &$r ) {
+            $r['session_ids']   = implode( ',', $r['session_ids'] );
+            $r['session_codes'] = implode( ',', $r['session_codes'] );
+        }
+        unset( $r );
+ 
+        return array_values( $bucket );
+    }
+    /**
+     * Compute counter pills from the unfiltered-by-state row set.
+     */
+    private function compute_activity_counts( $rows ) {
+        $now           = time();
+        $recent_cutoff = $now - ( self::ACTIVITY_RECENT_DAYS * DAY_IN_SECONDS );
+        $stale_cutoff  = $now - ( self::ACTIVITY_STALE_DAYS  * DAY_IN_SECONDS );
+ 
+        $counts = array(
+            'total'           => count( $rows ),
+            'never_logged_in' => 0,
+            'recent_7d'       => 0,
+            'stale_30d'       => 0,
+            'no_account'      => 0,
+        );
+ 
+        foreach ( $rows as $r ) {
+            $kind = $r['kind'] ?? 'registered';
+ 
+            if ( $kind === 'unregistered' ) {
+                $counts['no_account']++;
+                // Unregistered rows don't contribute to login-state pills —
+                // they CAN'T have logins, so counting them under "Never
+                // Logged In" would be misleading.
+                continue;
+            }
+ 
+            $last = $r['last_login'] ? strtotime( $r['last_login'] . ' UTC' ) : null;
+            if ( ! $last )                          $counts['never_logged_in']++;
+            if ( $last && $last >= $recent_cutoff ) $counts['recent_7d']++;
+            if ( ! $last || $last < $stale_cutoff ) $counts['stale_30d']++;
+        }
+ 
+        return $counts;
+    }
+
+ 
+    /**
+     * Add view-friendly fields to each row: session_links, is_recent, is_stale.
+     *
+     * Building the per-session audit-log URLs server-side keeps the view
+     * declarative and makes them work in the CSV export as a "Sessions"
+     * column without the view having to know about URL construction.
+     */
+    private function decorate_activity_rows( $rows ) {
+        $now           = time();
+        $recent_cutoff = $now - ( self::ACTIVITY_RECENT_DAYS * DAY_IN_SECONDS );
+        $stale_cutoff  = $now - ( self::ACTIVITY_STALE_DAYS  * DAY_IN_SECONDS );
+ 
+        $audit_base = admin_url( 'admin.php?page=wssp-report-audit' );
+ 
+        foreach ( $rows as &$r ) {
+            $kind                 = $r['kind'] ?? 'registered';
+            $r['is_unregistered'] = ( $kind === 'unregistered' );
+ 
+            $codes = $r['session_codes'] ? explode( ',', $r['session_codes'] ) : array();
+            $ids   = $r['session_ids']   ? explode( ',', $r['session_ids'] )   : array();
+ 
+            $links = array();
+            foreach ( $codes as $i => $code ) {
+                $sid = isset( $ids[ $i ] ) ? (int) $ids[ $i ] : 0;
+                if ( ! $sid ) continue;
+ 
+                // Unregistered contacts get plain code tags (no audit link),
+                // since they have no audit history. The view branches on
+                // is_unregistered to decide whether to render as <a> or <span>.
+                $links[] = array(
+                    'code'      => $code,
+                    'audit_url' => $r['is_unregistered'] ? '' : add_query_arg(
+                        array(
+                            'session_id' => $sid,
+                            'action'     => 'login',
+                        ),
+                        $audit_base
+                    ),
+                );
+            }
+            $r['session_links'] = $links;
+ 
+            if ( $r['is_unregistered'] ) {
+                $r['is_recent'] = false;
+                $r['is_stale']  = false;
+            } else {
+                $last           = $r['last_login'] ? strtotime( $r['last_login'] . ' UTC' ) : null;
+                $r['is_recent'] = $last && $last >= $recent_cutoff;
+                $r['is_stale']  = ! $last || $last < $stale_cutoff;
+            }
+        }
+        unset( $r );
+ 
+        return $rows;
+    } 
+    /**
+     * CSV export handler. Uses the same data-loader and decorator as the
+     * HTML view so the export reflects the active filters exactly.
+     */
+    public function maybe_handle_activity_export() {
+        if ( ! is_admin() )                                          return;
+        if ( ( $_GET['page']   ?? '' ) !== 'wssp-report-activity' )  return;
+        if ( ( $_GET['export'] ?? '' ) !== 'csv' )                   return;
+        if ( ! current_user_can( 'edit_posts' ) )                    return;
+ 
+        $filters = $this->parse_activity_filters();
+        $rows    = $this->load_activity_rows( $filters );
+        $rows    = $this->decorate_activity_rows( $rows );
+ 
+        $filename = 'sponsor-activity-' . current_time( 'Y-m-d' ) . '.csv';
+        nocache_headers();
+        header( 'Content-Type: text/csv; charset=UTF-8' );
+        header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+ 
+        $out = fopen( 'php://output', 'w' );
+ 
+        fputcsv( $out, array(
+            'Display Name', 'Email', 'Role', 'Sessions',
+            'Last Login (UTC)', 'Distinct Login Days', 'Total Login Events',
+            'Status',
+        ), ',', '"', '' );
+ 
+        foreach ( $rows as $r ) {
+            if ( ! empty( $r['is_unregistered'] ) ) {
+                $status = 'No portal account';
+            } elseif ( ! $r['last_login'] ) {
+                $status = 'Never logged in';
+            } elseif ( ! empty( $r['is_recent'] ) ) {
+                $status = 'Active (last 7 days)';
+            } elseif ( ! empty( $r['is_stale'] ) ) {
+                $status = 'Stale (>30 days)';
+            } else {
+                $status = 'Logged in';
+            }
+ 
+            fputcsv( $out, array(
+                $r['display_name'],
+                $r['user_email'],
+                $r['role'],
+                $r['session_codes'],
+                $r['last_login'] ?: '',
+                (int) $r['login_days'],
+                (int) $r['total_logins'],
+                $status,
+            ), ',', '"', '' );
+        }
+        fclose( $out );
+        exit;
+    }
+    
+    /* ═══════════════════════════════════════════
+     * REPORT — Vendor Report (AV / Print / Hotel)
+     * Per-vendor view of session data scoped to
+     * what each vendor team needs.
+     * ═══════════════════════════════════════════ */
+ 
+    /**
+     * Render the Vendor Report admin page.
+     *
+     * Behavior depends on who's viewing:
+     *   - Logistics (administrator, edit_posts) — sees a vendor-type dropdown,
+     *     can switch between AV / Print / Hotel views.
+     *   - Vendor user (wssp_vendor role) — locked to their own type, no dropdown.
+     */
+    public function render_vendor_report() {
+        $current_user = wp_get_current_user();
+ 
+        /*
+         * Determine which vendor type to display:
+         *   1. If the user is a vendor, force their type (ignore querystring).
+         *   2. If the user is logistics, accept ?type= or default to 'av'.
+         */
+        $is_vendor      = WSSP_Vendor_Access::is_vendor( $current_user );
+        $vendor_locked  = $is_vendor;
+        $forced_type    = $is_vendor ? WSSP_Vendor_Access::get_vendor_type( $current_user->ID ) : '';
+        $requested_type = isset( $_GET['type'] ) ? sanitize_key( $_GET['type'] ) : '';
+ 
+        $type = $vendor_locked ? $forced_type : $requested_type;
+        if ( ! in_array( $type, WSSP_Vendor_Access::VENDOR_TYPES, true ) ) {
+            $type = 'av'; // Sensible default for logistics first-load.
+        }
+ 
+        // If a vendor user has no type set on their account, show a friendly
+        // message instead of a blank report — helps logistics realize they
+        // need to set the type.
+        if ( $vendor_locked && ! $forced_type ) {
+            include WSSP_PLUGIN_DIR . 'admin/views/report-vendor-no-type.php';
+            return;
+        }
+ 
+        $filters = $this->parse_vendor_report_filters();
+        $rows    = $this->load_vendor_report_rows( $type, $filters );
+ 
+        $event_type    = 'satellite';
+        $vendor_views  = $this->config->get_vendor_views( $event_type );
+        $vendor_config = $vendor_views[ $type ] ?? array();
+ 
+        $base_url   = admin_url( 'admin.php?page=wssp-report-vendors' );
+        $export_url = add_query_arg(
+            array_merge( array( 'type' => $type ), $filters, array( 'export' => 'csv' ) ),
+            $base_url
+        );
+ 
+        include WSSP_PLUGIN_DIR . 'admin/views/report-vendor.php';
+    }
+ 
+    /**
+     * Read and sanitize querystring filters for the vendor report.
+     */
+    private function parse_vendor_report_filters() {
+        $status = isset( $_GET['session_status'] ) ? sanitize_text_field( wp_unslash( $_GET['session_status'] ) ) : '';
+        if ( ! in_array( $status, array( '', 'on_track', 'attention_needed', 'submitted_for_review', 'completed' ), true ) ) {
+            $status = '';
+        }
+        return array(
+            'session_status' => $status,
+            'search'         => isset( $_GET['search'] ) ? sanitize_text_field( wp_unslash( $_GET['search'] ) ) : '',
+        );
+    }
+ 
+    /**
+     * Load the dataset for a vendor report.
+     *
+     * Strategy:
+     *   - Pull every session, ordered by session_code.
+     *   - For each session, gather the fields this vendor type cares about
+     *     (per portal-config vendor_views).
+     *   - Surface scheduling fields (date, time, room, contacts) for
+     *     every vendor type — they all need this baseline context.
+     *   - Apply text-search across session_code, short_name, sponsor.
+     *
+     * Returns one row per session, with the vendor-specific fields packed
+     * into a 'fields' sub-array (so the view can render them generically).
+     *
+     * @param string $type    'av' | 'print' | 'hotel'
+     * @param array  $filters Active filter querystring values.
+     * @return array
+     */
+    private function load_vendor_report_rows( $type, $filters ) {
+        global $wpdb;
+ 
+        $event_type   = 'satellite';
+        $vendor_views = $this->config->get_vendor_views( $event_type );
+        $vendor_cfg   = $vendor_views[ $type ] ?? array();
+        $field_keys   = (array) ( $vendor_cfg['fields']     ?? array() );
+        $file_types   = (array) ( $vendor_cfg['file_types'] ?? array() );
+ 
+        /* ─── 1. Base session list ─── */
+ 
+        $where  = array();
+        $values = array();
+ 
+        if ( ! empty( $filters['session_status'] ) ) {
+            $where[]  = 's.rollup_status = %s';
+            $values[] = $filters['session_status'];
+        }
+ 
+        if ( ! empty( $filters['search'] ) ) {
+            $like     = '%' . $wpdb->esc_like( $filters['search'] ) . '%';
+            $where[]  = '( s.session_code LIKE %s OR s.short_name LIKE %s)';
+            $values[] = $like;
+            $values[] = $like;
+            $values[] = $like;
+        }
+ 
+        $where_sql = $where ? ( ' WHERE ' . implode( ' AND ', $where ) ) : '';
+ 
+        $sql = "
+            SELECT id, session_code, short_name, rollup_status, session_key
+            FROM {$this->sessions_table} s
+            {$where_sql}
+            ORDER BY s.session_code ASC
+        ";
+ 
+        if ( $values ) {
+            $sql = $wpdb->prepare( $sql, ...$values );
+        }
+ 
+        $sessions = $wpdb->get_results( $sql, ARRAY_A );
+        if ( empty( $sessions ) ) {
+            return array();
+        }
+ 
+        /* ─── 2. Per-session vendor data ─── */
+ 
+        $rows = array();
+        foreach ( $sessions as $s ) {
+            $session_id   = (int) $s['id'];
+            $session_data = $this->formidable->get_full_session_data( $s['session_key'] );
+ 
+            // Baseline fields every vendor type needs: scheduling and contacts.
+            $baseline = array(
+                'session_day'      => $session_data['session_day']         ?? '',
+                'session_date'     => $session_data['session_date']        ?? '',
+                'session_time'     => $session_data['session_time']        ?? '',
+                'session_location' => $session_data['session_location']    ?? '',
+                'company_name'     => $session_data['wssp_data_company_name']
+                                    ?? $session_data['wssp_data_supported_by']
+                                    ?? $session_data['short_name']
+                                    ?? '',
+                'session_title'    => $session_data['wssp_program_title']
+                                    ?? $session_data['topic']
+                                    ?? '',
+            );
+ 
+            // Vendor-specific fields, pulled by key from the merged data.
+            $vendor_fields = array();
+            foreach ( $field_keys as $fk ) {
+                $val = $session_data[ $fk ] ?? '';
+                if ( is_array( $val ) ) {
+                    $val = implode( ', ', array_map( 'strval', $val ) );
+                }
+                $vendor_fields[ $fk ] = (string) $val;
+            }
+ 
+            // Vendor-specific file types: surface latest version + status
+            // for each file type the vendor config asks for.
+            $vendor_files = array();
+            if ( $file_types ) {
+                $file_summary = class_exists( 'FrmForm' )
+                    ? $this->formidable->get_material_file_summary( $s['session_key'] )
+                    : array();
+                foreach ( $file_types as $ft ) {
+                    $vendor_files[ $ft ] = $file_summary[ $ft ] ?? null;
+                }
+            }
+ 
+            $rows[] = array(
+                'session_id'    => $session_id,
+                'session_code'  => $s['session_code'],
+                'short_name'    => $s['short_name'],
+                'rollup_status' => $s['rollup_status'],
+                'baseline'      => $baseline,
+                'fields'        => $vendor_fields,
+                'files'         => $vendor_files,
+            );
+        }
+ 
+        return $rows;
+    }
+ 
+    /**
+     * Human label for a portal field key, for display in the report.
+     *
+     * Tries the task content service for a label; falls back to a
+     * humanized version of the field key.
+     */
+    public function vendor_field_label( $field_key ) {
+        static $cache = array();
+        if ( isset( $cache[ $field_key ] ) ) {
+            return $cache[ $field_key ];
+        }
+ 
+        // Strip prefixes and humanize.
+        $stripped = preg_replace( '/^wssp_(av_|od_|program_|data_|request_)?/', '', $field_key );
+        $label    = ucwords( str_replace( '_', ' ', $stripped ) );
+ 
+        return $cache[ $field_key ] = $label;
+    }
+ 
+    /**
+     * Format a vendor field value for display.
+     *
+     * Empty → em-dash. Booleans/checkbox values → Yes/No.
+     * Anything else → escaped text with a max length.
+     */
+    public function vendor_field_display( $value, $max = 80 ) {
+        if ( $value === '' || $value === null ) return '—';
+ 
+        // Common boolean-y values from Formidable checkboxes.
+        if ( in_array( strtolower( $value ), array( '1', 'yes', 'true' ), true ) ) return 'Yes';
+        if ( in_array( strtolower( $value ), array( '0', 'no', 'false' ), true ) ) return 'No';
+ 
+        if ( mb_strlen( $value ) > $max ) {
+            return mb_substr( $value, 0, $max ) . '…';
+        }
+        return $value;
+    }
+ 
+    /**
+     * CSV export for the vendor report. Same data, flat rows.
+     */
+    public function maybe_handle_vendor_report_export() {
+        if ( ! is_admin() )                                          return;
+        if ( ( $_GET['page']   ?? '' ) !== 'wssp-report-vendors' )   return;
+        if ( ( $_GET['export'] ?? '' ) !== 'csv' )                   return;
+        if ( ! current_user_can( WSSP_Vendor_Access::CAP_VIEW_REPORT ) ) return;
+ 
+        $current_user = wp_get_current_user();
+        $is_vendor    = WSSP_Vendor_Access::is_vendor( $current_user );
+ 
+        $type = $is_vendor
+            ? WSSP_Vendor_Access::get_vendor_type( $current_user->ID )
+            : ( isset( $_GET['type'] ) ? sanitize_key( $_GET['type'] ) : '' );
+ 
+        if ( ! in_array( $type, WSSP_Vendor_Access::VENDOR_TYPES, true ) ) {
+            return; // Bail silently — no valid type, nothing to export.
+        }
+ 
+        $filters = $this->parse_vendor_report_filters();
+        $rows    = $this->load_vendor_report_rows( $type, $filters );
+ 
+        $vendor_views = $this->config->get_vendor_views( 'satellite' );
+        $vendor_cfg   = $vendor_views[ $type ] ?? array();
+        $field_keys   = (array) ( $vendor_cfg['fields']     ?? array() );
+        $file_types   = (array) ( $vendor_cfg['file_types'] ?? array() );
+ 
+        $filename = 'vendor-report-' . $type . '-' . current_time( 'Y-m-d' ) . '.csv';
+        nocache_headers();
+        header( 'Content-Type: text/csv; charset=UTF-8' );
+        header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+ 
+        $out = fopen( 'php://output', 'w' );
+ 
+        /*
+         * Build header row dynamically — baseline columns first, then one
+         * column per vendor field, then one column per vendor file type.
+         */
+        $header = array(
+            'Session Code', 'Session Title', 'Sponsor',
+            'Day', 'Date', 'Time', 'Room',
+        );
+        foreach ( $field_keys as $fk ) {
+            $header[] = $this->vendor_field_label( $fk );
+        }
+        foreach ( $file_types as $ft ) {
+            $header[] = ucwords( str_replace( '_', ' ', $ft ) ) . ' (status)';
+        }
+        fputcsv( $out, $header, ',', '"', '' );
+ 
+        foreach ( $rows as $r ) {
+            $line = array(
+                $r['session_code'],
+                $r['baseline']['session_title'],
+                $r['baseline']['company_name'],
+                $r['baseline']['session_day'],
+                $r['baseline']['session_date'],
+                $r['baseline']['session_time'],
+                $r['baseline']['session_location'],
+            );
+            foreach ( $field_keys as $fk ) {
+                $line[] = $r['fields'][ $fk ] ?? '';
+            }
+            foreach ( $file_types as $ft ) {
+                $f      = $r['files'][ $ft ] ?? null;
+                $line[] = $f ? ( ( $f['status'] ?? '' ) . ( ! empty( $f['version'] ) ? ' (v' . (int) $f['version'] . ')' : '' ) ) : '';
+            }
+            fputcsv( $out, $line, ',', '"', '' );
+        }
+        fclose( $out );
+        exit;
+    }
+
 }

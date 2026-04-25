@@ -1,12 +1,13 @@
 <?php
 /**
- * Session Overview  Session info card (2/3) + Task progress sidebar (1/3).
+ * Session Overview  Session info card (2/3) + Task progress sidebar (1/3).
  *
  * Expected variables:
  *   $session          (array)  Base session record
  *   $session_data     (array)  Full merged data: sessions table + session_meta + Formidable
  *   $phases           (array)  Enriched phase data (for deriving add-on pills)
  *   $event_type, $event_label, $purchased_addons, $stats, $session_id
+ *   $report_url       (string) URL of the printable status report (optional)
  */
 
 defined( 'ABSPATH' ) || exit;
@@ -47,6 +48,19 @@ $restricted    = $session_data['wssp_program_intl_audience_desc'] ?? '';
 // CE accredited sessions show the "Supported by" entity instead of company name
 if ( $ce_status && strtolower( $ce_status ) !== 'non-ce' && strtolower( $ce_status ) !== 'no' ) {
     $company = $session_data['wssp_data_supported_by'] ?? $company;
+}
+
+// Defensive default: if $report_url wasn't injected by the controller (e.g.
+// during transition or a future caller that forgets), fall back to building
+// it inline. Keeps the view robust.
+if ( ! isset( $report_url ) || ! $report_url ) {
+    $report_url = add_query_arg(
+        array(
+            'wssp_report' => 'session-status',
+            'session_key' => $session['session_key'],
+        ),
+        get_permalink()
+    );
 }
 
 ?>
@@ -112,7 +126,7 @@ if ( $ce_status && strtolower( $ce_status ) !== 'non-ce' && strtolower( $ce_stat
                             </svg>
                             <div>
                                 <span class="wssp-overview-card__contact-label">A/V Contact</span>
-                                <span class="wssp-overview-card__contact-value"><?php echo esc_html( $av_contact ); ?><?php echo $av_email ? '  ' . esc_html( $av_email ) : ''; ?></span>
+                                <span class="wssp-overview-card__contact-value"><?php echo esc_html( $av_contact ); ?><?php echo $av_email ? '  ' . esc_html( $av_email ) : ''; ?></span>
                             </div>
                         </div>
                     <?php endif; ?>
@@ -125,7 +139,7 @@ if ( $ce_status && strtolower( $ce_status ) !== 'non-ce' && strtolower( $ce_stat
                             </svg>
                             <div>
                                 <span class="wssp-overview-card__contact-label">Freeman Contact</span>
-                                <span class="wssp-overview-card__contact-value"><?php echo esc_html( $freeman ); ?><?php echo $freeman_email ? '  ' . esc_html( $freeman_email ) : ''; ?></span>
+                                <span class="wssp-overview-card__contact-value"><?php echo esc_html( $freeman ); ?><?php echo $freeman_email ? '  ' . esc_html( $freeman_email ) : ''; ?></span>
                             </div>
                         </div>
                     <?php endif; ?>
@@ -230,6 +244,22 @@ if ( $ce_status && strtolower( $ce_status ) !== 'non-ce' && strtolower( $ce_stat
                     <span class="wssp-progress-card__stat-of">urgent</span>
                 </span>
             </div>
+        </div>
+
+        <!-- ─── Status report download ─── -->
+        <div class="wssp-progress-card__report">
+            <a class="wssp-progress-card__report-btn"
+               href="<?php echo esc_url( $report_url ); ?>"
+               target="_blank"
+               rel="noopener">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="9"  y1="13" x2="15" y2="13"/>
+                    <line x1="9"  y1="17" x2="15" y2="17"/>
+                </svg>
+                Download Status Report
+            </a>
         </div>
     </div>
 
